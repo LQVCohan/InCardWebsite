@@ -25,13 +25,13 @@
     <main class="container">
       <!-- Uploader mặt trước -->
       <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
-        <p class="drop-title"><strong>Kéo & thả ảnh card vào đây</strong></p>
+        <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào đây</strong></p>
         <p class="drop-sub">hoặc</p>
         <label class="btn" for="fileInput">
           Chọn ảnh
-          <input type="file" id="fileInput" accept="image/*" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,.ydk" multiple hidden />
         </label>
-        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp.</p>
+        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp. File .ydk sẽ tự lấy ảnh theo ID.</p>
         <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
       </section>
 
@@ -195,8 +195,8 @@
     <div id="pageDropOverlay" class="page-drop-overlay" aria-hidden="true">
       <div class="page-drop-box">
         <div class="page-drop-icon">⬇</div>
-        <div class="page-drop-text">Thả ảnh hoặc link ảnh vào đây</div>
-        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… hoặc URL ảnh trực tiếp)</div>
+        <div class="page-drop-text">Thả ảnh, file .ydk, hoặc link ảnh vào đây</div>
+        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… URL ảnh trực tiếp hoặc deck .ydk)</div>
       </div>
     </div>
 
