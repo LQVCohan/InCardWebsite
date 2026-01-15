@@ -231,6 +231,11 @@ select option {
   border-color: rgba(56, 189, 248, 0.8);
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
 }
+.shortcut-input {
+  text-transform: uppercase;
+  text-align: center;
+  font-weight: 600;
+}
 .custom-size.hidden {
   display: none !important;
 }
@@ -362,9 +367,13 @@ select option {
   place-items: center;
   font-size: 0.8rem;
   cursor: pointer;
+  transition: transform 0.12s ease;
 }
 .qty-btn:hover {
   background: rgba(148, 163, 184, 0.12);
+}
+.qty-group:hover .qty-btn {
+  transform: scale(1.15);
 }
 .qty-input {
   width: 38px;
