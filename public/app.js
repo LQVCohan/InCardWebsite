@@ -42,6 +42,7 @@ let pageDragCounter = 0;
 let currentDeckName = null;
 let lastDocxTestOK = false;
 let undoSnapshot = null;
+let isInternalDrag = false;
 
 /* ---------------- DOM refs ---------------- */
 const dropzone = document.getElementById("dropzone");
@@ -89,11 +90,15 @@ const newDeckName = document.getElementById("newDeckName");
 const createDeckBtn = document.getElementById("createDeckBtn");
 
 const exportJsonBtn = document.getElementById("exportJson");
+const exportYdkBtn = document.getElementById("exportYdk");
 const importJsonBtn = document.getElementById("importBtn");
 const importJsonInput = document.getElementById("importJson");
 
 const updateDeckBtn = document.getElementById("updateDeckBtn");
 const currentDeckNameEl = document.getElementById("currentDeckName");
+const imageViewer = document.getElementById("imageViewer");
+const imageViewerImg = document.getElementById("imageViewerImg");
+const closeImageViewer = document.getElementById("closeImageViewer");
 
 /* ---------------- Helpers: Undo & Counters ---------------- */
 function snapshot() {
@@ -295,8 +300,55 @@ async function migrateOldDecksIfAny() {
 }
 
 /* ---------------- Files & URLs ---------------- */
-function handleFiles(fileList) {
-  snapshot();
+function isYdkFile(file) {
+  const name = file.name?.toLowerCase?.() || "";
+  return name.endsWith(".ydk");
+}
+
+function parseYdkText(text) {
+  // .ydk thường có các section: #main, #extra, !side; mỗi dòng là ID card.
+  const lines = text.split(/\r?\n/);
+  const order = [];
+  const counts = new Map();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#") || line.startsWith("!")) continue;
+    if (!/^\d+$/.test(line)) continue;
+    if (!counts.has(line)) {
+      counts.set(line, 0);
+      order.push(line);
+    }
+    counts.set(line, counts.get(line) + 1);
+  }
+  return order.map((id) => ({ id, qty: counts.get(id) || 1 }));
+}
+
+function buildYdkImageUrl(id) {
+  return `https://images.ygoprodeck.com/images/cards/${id}.jpg`;
+}
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+async function parseYdkFile(file) {
+  const text = await readFileText(file);
+  return parseYdkText(text).map((entry) => ({
+    name: `ID ${entry.id}`,
+    src: buildYdkImageUrl(entry.id),
+    qty: entry.qty,
+    external: true,
+    cardId: entry.id,
+  }));
+}
+
+async function handleFiles(fileList) {
   const validExt = [
     ".jpg",
     ".jpeg",
@@ -307,30 +359,57 @@ function handleFiles(fileList) {
     ".avif",
     ".heic",
   ];
-  const files = Array.from(fileList).filter((f) => {
+  const allFiles = Array.from(fileList);
+  const ydkFiles = allFiles.filter(isYdkFile);
+  const imageFiles = allFiles.filter((f) => {
     const name = f.name?.toLowerCase?.() || "";
     const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
     return (f.type && f.type.startsWith("image/")) || validExt.includes(ext);
   });
-  if (!files.length) {
-    alert("Không có ảnh hợp lệ.");
+
+  if (!ydkFiles.length && !imageFiles.length) {
+    alert("Không có ảnh hoặc file .ydk hợp lệ.");
     return;
   }
-  files.forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      cards.push({
-        name: file.name || "image",
-        src: evt.target.result,
-        qty: 1,
-        external: false,
-      });
+
+  snapshot();
+
+  if (ydkFiles.length) {
+    const ydkCards = [];
+    for (const file of ydkFiles) {
+      try {
+        const parsed = await parseYdkFile(file);
+        ydkCards.push(...parsed);
+      } catch (e) {
+        console.warn("Không đọc được file .ydk:", file?.name, e);
+        alert(`Không đọc được file .ydk: ${file?.name || "unknown"}`);
+      }
+    }
+    if (ydkCards.length) {
+      cards.push(...ydkCards);
       renderList();
       drawLayoutPreview();
       updateCounters();
-    };
-    reader.readAsDataURL(file);
-  });
+    }
+  }
+
+  if (imageFiles.length) {
+    imageFiles.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        cards.push({
+          name: file.name || "image",
+          src: evt.target.result,
+          qty: 1,
+          external: false,
+        });
+        renderList();
+        drawLayoutPreview();
+        updateCounters();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 }
 
 async function handleUrlImage(url) {
@@ -409,6 +488,7 @@ document.addEventListener("paste", async (e) => {
 /* ---------------- Dropzone small ---------------- */
 dropzone.addEventListener("dragover", (e) => {
   e.preventDefault();
+  if (isInternalDrag) return;
   dropzone.classList.add("dragover");
 });
 dropzone.addEventListener("dragleave", () =>
@@ -417,6 +497,8 @@ dropzone.addEventListener("dragleave", () =>
 dropzone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropzone.classList.remove("dragover");
+  if (isInternalDrag) return;
+  if (e.dataTransfer?.types?.includes("text/x-card-printer")) return;
   const url =
     e.dataTransfer.getData("text/uri-list") ||
     e.dataTransfer.getData("text/plain");
@@ -431,6 +513,7 @@ fileInput.addEventListener("change", (e) => handleFiles(e.target.files));
 /* ---------------- Whole-page drag overlay (only 1-side) ---------------- */
 document.addEventListener("dragenter", () => {
   if (frontBackModeSelect.value === "front-back") return;
+  if (isInternalDrag) return;
   pageDragCounter++;
   pageDropOverlay.classList.add("show");
 });
@@ -441,6 +524,7 @@ document.addEventListener("dragleave", () => {
 });
 document.addEventListener("dragover", (e) => {
   if (frontBackModeSelect.value === "front-back") return;
+  if (isInternalDrag) return;
   e.preventDefault();
 });
 document.addEventListener("drop", (e) => {
@@ -448,6 +532,8 @@ document.addEventListener("drop", (e) => {
   e.preventDefault();
   pageDragCounter = 0;
   pageDropOverlay.classList.remove("show");
+  if (isInternalDrag) return;
+  if (e.dataTransfer?.types?.includes("text/x-card-printer")) return;
   const url =
     e.dataTransfer.getData("text/uri-list") ||
     e.dataTransfer.getData("text/plain");
@@ -484,7 +570,7 @@ function renderList() {
     li.draggable = true;
     li.dataset.index = index;
     li.innerHTML = `
-      <img src="${card.src}" alt="card ${index + 1}">
+      <img src="${card.src}" alt="card ${index + 1}" draggable="false" loading="lazy">
       <div class="preview-meta">
         <span>#${index + 1}${
       card.external ? ' · <span style="color:#38bdf8">URL</span>' : ""
@@ -503,6 +589,7 @@ function renderList() {
     )}</span></div>
     `;
     li.addEventListener("dragstart", handleDragStart);
+    li.addEventListener("dragend", handleDragEnd);
     li.addEventListener("dragover", handleDragOver);
     li.addEventListener("drop", handleDrop);
     previewList.appendChild(li);
@@ -512,9 +599,17 @@ function shortName(name) {
   if (!name) return "";
   return name.length > 16 ? name.slice(0, 14) + "…" : name;
 }
-function handleDragStart() {
+function handleDragStart(e) {
   snapshot();
+  isInternalDrag = true;
+  if (e?.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/x-card-printer", "1");
+  }
   dragSrcIndex = +this.dataset.index;
+}
+function handleDragEnd() {
+  isInternalDrag = false;
 }
 function handleDragOver(e) {
   e.preventDefault();
@@ -552,6 +647,12 @@ previewList.addEventListener("click", (e) => {
     updateCounters();
     return;
   }
+  const targetImg = e.target.closest("img");
+  if (targetImg && imageViewer && imageViewerImg) {
+    imageViewerImg.src = targetImg.src;
+    imageViewerImg.alt = targetImg.alt || "Card preview";
+    imageViewer.classList.remove("hidden");
+  }
 });
 previewList.addEventListener("input", (e) => {
   const qtyEl = e.target.closest("[data-qty]");
@@ -561,6 +662,19 @@ previewList.addEventListener("input", (e) => {
   const val = Math.max(1, +qtyEl.value);
   cards[idx].qty = val;
   updateCounters();
+});
+if (closeImageViewer) {
+  closeImageViewer.addEventListener("click", () =>
+    imageViewer?.classList.add("hidden")
+  );
+}
+if (imageViewer) {
+  imageViewer.addEventListener("click", (e) => {
+    if (e.target === imageViewer) imageViewer.classList.add("hidden");
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && imageViewer) imageViewer.classList.add("hidden");
 });
 
 /* ---------------- Settings change handlers ---------------- */
@@ -687,7 +801,10 @@ async function toJPEGDataURL(src, quality = 1) {
     const c = document.createElement("canvas");
     c.width = img.naturalWidth || img.width || 1;
     c.height = img.naturalHeight || img.height || 1;
-    c.getContext("2d").drawImage(img, 0, 0);
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0);
     return c.toDataURL("image/jpeg", quality);
   } catch (e) {
     // nếu bạn có proxy: bật fallback qua proxy
@@ -697,7 +814,10 @@ async function toJPEGDataURL(src, quality = 1) {
       const c = document.createElement("canvas");
       c.width = img.naturalWidth || img.width || 1;
       c.height = img.naturalHeight || img.height || 1;
-      c.getContext("2d").drawImage(img, 0, 0);
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0);
       return c.toDataURL("image/jpeg", quality);
     }
     throw e;
@@ -1303,6 +1423,28 @@ updateDeckBtn.addEventListener("click", async () => {
     settings: grabSettings(),
   });
   alert(`✅ Đã cập nhật deck "${currentDeckName}".`);
+});
+
+/* ---------------- YDK export ---------------- */
+exportYdkBtn?.addEventListener("click", () => {
+  const withIds = cards.filter((card) => card.cardId);
+  if (!withIds.length) {
+    alert("Không có card .ydk nào để xuất. Hãy nhập deck .ydk trước.");
+    return;
+  }
+  const lines = ["#created by Card Printer Pro", "#main"];
+  withIds.forEach((card) => {
+    const qty = Math.max(1, Number(card.qty) || 1);
+    for (let i = 0; i < qty; i++) lines.push(card.cardId);
+  });
+  lines.push("#extra", "!side");
+  const blob = new Blob([lines.join("\n")], {
+    type: "text/plain",
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (fileNameInput.value || "deck") + ".ydk";
+  a.click();
 });
 
 /* ---------------- JSON import/export ---------------- */

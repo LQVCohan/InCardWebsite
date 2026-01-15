@@ -275,6 +275,7 @@ select option {
   object-fit: cover;
   border-radius: 0.4rem;
   background: #0f172a;
+  cursor: zoom-in;
 }
 .preview-meta {
   display: flex;
@@ -448,6 +449,41 @@ select option {
 .modal-footer {
   text-align: right;
   margin-top: 1rem;
+}
+
+/* Image viewer */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.7);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+.image-viewer.hidden {
+  display: none;
+}
+.image-viewer-content {
+  position: relative;
+  max-width: min(90vw, 700px);
+  max-height: 90vh;
+  background: rgba(15, 23, 42, 0.9);
+  padding: 1rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  display: grid;
+  gap: 0.6rem;
+}
+.image-viewer-content button {
+  justify-self: end;
+}
+.image-viewer-content img {
+  width: 100%;
+  height: auto;
+  max-height: 75vh;
+  object-fit: contain;
+  border-radius: 0.6rem;
+  background: #0f172a;
 }
 
 /* Overlay toàn trang */
