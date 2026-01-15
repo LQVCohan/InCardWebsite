@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Card Printer Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">🃏</div>
+        <div>
+          <h1>Card Printer Pro</h1>
+          <p>In card TCG / Yu-Gi-Oh / Digimon – chạy offline.</p>
+        </div>
+      </div>
+      <div class="deck-status">
+        <span id="currentDeckName" class="deck-name">🗂 Deck: <em>Chưa chọn</em></span>
+        <button id="updateDeckBtn" class="btn outline small" disabled title="Ghi đè deck đang mở">💾 Cập nhật Deck</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- Uploader mặt trước -->
+      <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
+        <p class="drop-title"><strong>Kéo & thả ảnh card vào đây</strong></p>
+        <p class="drop-sub">hoặc</p>
+        <label class="btn" for="fileInput">
+          Chọn ảnh
+          <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        </label>
+        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp.</p>
+        <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
+      </section>
+
+      <!-- Uploader mặt sau (ẩn/hiện theo chế độ) -->
+      <section class="uploader small-uploader" id="backSection" style="display:none">
+        <p><strong>Ảnh mặt sau</strong></p>
+        <label class="btn" for="backInput">
+          Chọn ảnh mặt sau
+          <input type="file" id="backInput" accept="image/*" hidden />
+        </label>
+        <p id="backInfo" class="hint">Chưa chọn mặt sau.</p>
+      </section>
+
+      <!-- Controls -->
+      <section class="controls" aria-label="Thiết lập in">
+        <div>
+          <label for="cardPreset">Kích thước card</label>
+          <select id="cardPreset">
+            <option value="63x88">TCG 63×88 mm</option>
+            <option value="59x86">Yu-Gi-Oh 59×86 mm</option>
+            <option value="70x120">70×120 mm</option>
+            <option value="custom">Tùy chỉnh</option>
+          </select>
+        </div>
+
+        <div id="customSize" class="custom-size hidden">
+          <label>Rộng × Cao (mm)</label>
+          <div class="inline-inputs">
+            <input type="number" id="cardW" value="63" min="20" />
+            <span>x</span>
+            <input type="number" id="cardH" value="88" min="20" />
+          </div>
+        </div>
+
+        <div>
+          <label for="pageSize">Khổ giấy</label>
+          <select id="pageSize">
+            <option value="a4">A4 (210×297)</option>
+            <option value="letter">Letter (216×279)</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="orientation">Hướng giấy</label>
+          <select id="orientation">
+            <option value="portrait">Dọc</option>
+            <option value="landscape">Ngang</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="margin">Lề trang (mm)</label>
+          <input type="number" id="margin" value="4" min="0" />
+        </div>
+
+        <div>
+          <label for="gap">Khoảng cách giữa card (mm)</label>
+          <input type="number" id="gap" value="2" min="0" />
+        </div>
+
+        <div>
+          <label for="bleed">Bleed (mm)</label>
+          <input type="number" id="bleed" value="0" min="0" />
+        </div>
+
+        <div>
+          <label for="fileName">Tên file</label>
+          <input type="text" id="fileName" value="cards" />
+        </div>
+
+        <div>
+          <label for="frontBackMode">Chế độ in</label>
+          <select id="frontBackMode" title="Chỉ mặt trước / sau hoặc cả hai">
+            <option value="front-only" selected>Chỉ mặt trước</option>
+            <option value="back-only">Chỉ mặt sau</option>
+            <option value="front-back">Mặt trước + mặt sau</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="backFlipMode">Căn mặt sau</label>
+          <select id="backFlipMode" disabled title="Dùng khi in 2 mặt">
+            <option value="none" selected>Không đảo</option>
+            <option value="short">In 2 mặt mép ngắn</option>
+            <option value="long">In 2 mặt mép dài</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="cropMarks">Dấu cắt</label>
+          <select id="cropMarks">
+            <option value="none">Không</option>
+            <option value="short" selected>Ngắn</option>
+            <option value="full">Đầy đủ</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="autoFit">Nhồi 9 card?</label>
+          <select id="autoFit">
+            <option value="on" selected>Tự co để đủ 9</option>
+            <option value="off">Giữ đúng size</option>
+          </select>
+        </div>
+
+        <div class="actions">
+          <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
+          <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
+          <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
+          <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
+          <button id="saveDeck" class="btn muted">Lưu deck</button>
+          <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
+          <button id="exportJson" class="btn outline">Xuất JSON</button>
+          <button id="importBtn" class="btn outline">Nhập JSON</button>
+          <input type="file" id="importJson" accept="application/json" hidden />
+          <button id="clearDeck" class="btn danger">Xoá hết</button>
+        </div>
+      </section>
+
+      <!-- Danh sách -->
+      <section>
+        <h2 style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+          Danh sách card
+          <span class="pill">Ảnh duy nhất: <strong id="countUnique">0</strong></span>
+          <span class="pill">Bản in: <strong id="countTotal">0</strong></span>
+        </h2>
+        <p class="small">Kéo để đổi thứ tự. Dùng + / - để tăng giảm số lượng in. Bấm vào “Quản lý deck” để lưu/tải/quản lý.</p>
+        <ul id="previewList" class="preview-list"></ul>
+      </section>
+
+      <!-- Preview bố cục -->
+      <section class="preview-panel">
+        <h3>Preview bố cục</h3>
+        <canvas id="layoutPreview" width="210" height="297" aria-label="Sơ đồ trang in"></canvas>
+        <p class="hint">In ở 100% / Actual size để đúng mm. PDF/DOCX mới là chuẩn để in.</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Tip: Dán (Ctrl + V) ảnh hoặc URL. Khi in 2 mặt, chỉ kéo/đặt ảnh mặt sau trong ô “Ảnh mặt sau”.</p>
+    </footer>
+
+    <!-- Modal Quản lý Deck -->
+    <div id="deckManager" class="deck-modal hidden" role="dialog" aria-modal="true" aria-labelledby="deckModalTitle">
+      <div class="deck-modal-content">
+        <h3 id="deckModalTitle">📚 Quản lý Deck</h3>
+        <div id="deckList" class="deck-list" aria-live="polite"></div>
+
+        <div class="deck-add">
+          <input type="text" id="newDeckName" placeholder="Tên deck mới..." />
+          <button id="createDeckBtn" class="btn primary">Tạo mới</button>
+        </div>
+
+        <div class="modal-footer">
+          <button id="closeDeckManager" class="btn muted">Đóng</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overlay kéo thả toàn trang -->
+    <div id="pageDropOverlay" class="page-drop-overlay" aria-hidden="true">
+      <div class="page-drop-box">
+        <div class="page-drop-icon">⬇</div>
+        <div class="page-drop-text">Thả ảnh hoặc link ảnh vào đây</div>
+        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… hoặc URL ảnh trực tiếp)</div>
+      </div>
+    </div>
+
+    <!-- Loader thư viện auto online/offline -->
+    <script>
+      (async () => {
+        const loadScript = (src) => new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = src; s.onload = () => res(src); s.onerror = () => rej(src);
+          document.head.appendChild(s);
+        });
+        const DOCX_CDN = [
+          "https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js",
+          "https://cdn.jsdelivr.net/npm/docx@9.4.1/dist/index.iife.js",
+          "https://cdn.jsdelivr.net/npm/docx@8.5.0/dist/index.iife.js"
+        ];
+        const JSPDF_CDN = [
+          "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+          "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+        ];
+        const DOCX_LOCAL = "libs/docx.iife.js";
+        const JSPDF_LOCAL = "libs/jspdf.umd.min.js";
+
+        const tryMany = async (list, fallback) => {
+          for (const url of list) {
+            try { await loadScript(url); return; } catch {}
+          }
+          await loadScript(fallback);
+        };
+
+        if (!navigator.onLine) {
+          await loadScript(DOCX_LOCAL);
+          await loadScript(JSPDF_LOCAL);
+        } else {
+          await tryMany(DOCX_CDN, DOCX_LOCAL);
+          await tryMany(JSPDF_CDN, JSPDF_LOCAL);
+        }
+      })();
+    </script>
+
+    <!-- Script chính -->
+    <script src="app.js"></script>
+  </body>
+</html>
