@@ -295,8 +295,54 @@ async function migrateOldDecksIfAny() {
 }
 
 /* ---------------- Files & URLs ---------------- */
-function handleFiles(fileList) {
-  snapshot();
+function isYdkFile(file) {
+  const name = file.name?.toLowerCase?.() || "";
+  return name.endsWith(".ydk");
+}
+
+function parseYdkText(text) {
+  // .ydk thường có các section: #main, #extra, !side; mỗi dòng là ID card.
+  const lines = text.split(/\r?\n/);
+  const order = [];
+  const counts = new Map();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#") || line.startsWith("!")) continue;
+    if (!/^\d+$/.test(line)) continue;
+    if (!counts.has(line)) {
+      counts.set(line, 0);
+      order.push(line);
+    }
+    counts.set(line, counts.get(line) + 1);
+  }
+  return order.map((id) => ({ id, qty: counts.get(id) || 1 }));
+}
+
+function buildYdkImageUrl(id) {
+  return `https://images.ygoprodeck.com/images/cards/${id}.jpg`;
+}
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+async function parseYdkFile(file) {
+  const text = await readFileText(file);
+  return parseYdkText(text).map((entry) => ({
+    name: `ID ${entry.id}`,
+    src: buildYdkImageUrl(entry.id),
+    qty: entry.qty,
+    external: true,
+  }));
+}
+
+async function handleFiles(fileList) {
   const validExt = [
     ".jpg",
     ".jpeg",
@@ -307,30 +353,57 @@ function handleFiles(fileList) {
     ".avif",
     ".heic",
   ];
-  const files = Array.from(fileList).filter((f) => {
+  const allFiles = Array.from(fileList);
+  const ydkFiles = allFiles.filter(isYdkFile);
+  const imageFiles = allFiles.filter((f) => {
     const name = f.name?.toLowerCase?.() || "";
     const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
     return (f.type && f.type.startsWith("image/")) || validExt.includes(ext);
   });
-  if (!files.length) {
-    alert("Không có ảnh hợp lệ.");
+
+  if (!ydkFiles.length && !imageFiles.length) {
+    alert("Không có ảnh hoặc file .ydk hợp lệ.");
     return;
   }
-  files.forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      cards.push({
-        name: file.name || "image",
-        src: evt.target.result,
-        qty: 1,
-        external: false,
-      });
+
+  snapshot();
+
+  if (ydkFiles.length) {
+    const ydkCards = [];
+    for (const file of ydkFiles) {
+      try {
+        const parsed = await parseYdkFile(file);
+        ydkCards.push(...parsed);
+      } catch (e) {
+        console.warn("Không đọc được file .ydk:", file?.name, e);
+        alert(`Không đọc được file .ydk: ${file?.name || "unknown"}`);
+      }
+    }
+    if (ydkCards.length) {
+      cards.push(...ydkCards);
       renderList();
       drawLayoutPreview();
       updateCounters();
-    };
-    reader.readAsDataURL(file);
-  });
+    }
+  }
+
+  if (imageFiles.length) {
+    imageFiles.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        cards.push({
+          name: file.name || "image",
+          src: evt.target.result,
+          qty: 1,
+          external: false,
+        });
+        renderList();
+        drawLayoutPreview();
+        updateCounters();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 }
 
 async function handleUrlImage(url) {
