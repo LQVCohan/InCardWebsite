@@ -145,6 +145,7 @@
           <button id="saveDeck" class="btn muted">Lưu deck</button>
           <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
           <button id="exportJson" class="btn outline">Xuất JSON</button>
+          <button id="exportYdk" class="btn outline">Xuất YDK</button>
           <button id="importBtn" class="btn outline">Nhập JSON</button>
           <input type="file" id="importJson" accept="application/json" hidden />
           <button id="clearDeck" class="btn danger">Xoá hết</button>
@@ -188,6 +189,14 @@
         <div class="modal-footer">
           <button id="closeDeckManager" class="btn muted">Đóng</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Image viewer -->
+    <div id="imageViewer" class="image-viewer hidden" role="dialog" aria-modal="true" aria-label="Xem ảnh">
+      <div class="image-viewer-content">
+        <button id="closeImageViewer" class="btn outline small" aria-label="Đóng">✕</button>
+        <img id="imageViewerImg" alt="Card preview" />
       </div>
     </div>
 
