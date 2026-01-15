@@ -165,6 +165,11 @@ body {
   background: rgba(226, 232, 240, 0.12);
   border-color: rgba(255, 255, 255, 0.1);
 }
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 .btn.primary {
   background: linear-gradient(140deg, #0ea5e9, #38bdf8);
   border: 1px solid rgba(148, 163, 184, 0.1);
@@ -244,6 +249,46 @@ select option {
   flex-wrap: wrap;
   align-items: center;
 }
+.actions-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.4rem;
+  border-radius: 0.8rem;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
+.actions-group .btn {
+  margin: 0;
+}
+
+.format-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.badge {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+}
+
+.empty-state {
+  margin-top: 0.6rem;
+  padding: 0.8rem 1rem;
+  border-radius: 0.8rem;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.3);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.empty-state.hidden {
+  display: none;
+}
 
 /* List */
 .preview-list {
@@ -275,6 +320,7 @@ select option {
   object-fit: cover;
   border-radius: 0.4rem;
   background: #0f172a;
+  cursor: zoom-in;
 }
 .preview-meta {
   display: flex;
@@ -448,6 +494,41 @@ select option {
 .modal-footer {
   text-align: right;
   margin-top: 1rem;
+}
+
+/* Image viewer */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.7);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+.image-viewer.hidden {
+  display: none;
+}
+.image-viewer-content {
+  position: relative;
+  max-width: min(90vw, 700px);
+  max-height: 90vh;
+  background: rgba(15, 23, 42, 0.9);
+  padding: 1rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  display: grid;
+  gap: 0.6rem;
+}
+.image-viewer-content button {
+  justify-self: end;
+}
+.image-viewer-content img {
+  width: 100%;
+  height: auto;
+  max-height: 75vh;
+  object-fit: contain;
+  border-radius: 0.6rem;
+  background: #0f172a;
 }
 
 /* Overlay toàn trang */

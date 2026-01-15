@@ -25,13 +25,20 @@
     <main class="container">
       <!-- Uploader mặt trước -->
       <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
-        <p class="drop-title"><strong>Kéo & thả ảnh card vào đây</strong></p>
+        <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào đây</strong></p>
         <p class="drop-sub">hoặc</p>
         <label class="btn" for="fileInput">
           Chọn ảnh
-          <input type="file" id="fileInput" accept="image/*" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,.ydk" multiple hidden />
         </label>
-        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp.</p>
+        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp. File .ydk sẽ tự lấy ảnh theo ID.</p>
+        <div class="format-badges" aria-label="Định dạng hỗ trợ">
+          <span class="badge">.jpg</span>
+          <span class="badge">.png</span>
+          <span class="badge">.webp</span>
+          <span class="badge">.avif</span>
+          <span class="badge">.ydk</span>
+        </div>
         <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
       </section>
 
@@ -138,16 +145,23 @@
         </div>
 
         <div class="actions">
-          <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
-          <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
-          <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
-          <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
-          <button id="saveDeck" class="btn muted">Lưu deck</button>
-          <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
-          <button id="exportJson" class="btn outline">Xuất JSON</button>
-          <button id="importBtn" class="btn outline">Nhập JSON</button>
-          <input type="file" id="importJson" accept="application/json" hidden />
-          <button id="clearDeck" class="btn danger">Xoá hết</button>
+          <div class="actions-group">
+            <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
+            <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
+            <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
+          </div>
+          <div class="actions-group">
+            <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
+            <button id="saveDeck" class="btn muted">Lưu deck</button>
+            <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
+          </div>
+          <div class="actions-group">
+            <button id="exportJson" class="btn outline">Xuất JSON</button>
+            <button id="exportYdk" class="btn outline">Xuất YDK</button>
+            <button id="importBtn" class="btn outline">Nhập JSON</button>
+            <input type="file" id="importJson" accept="application/json" hidden />
+            <button id="clearDeck" class="btn danger">Xoá hết</button>
+          </div>
         </div>
       </section>
 
@@ -159,6 +173,8 @@
           <span class="pill">Bản in: <strong id="countTotal">0</strong></span>
         </h2>
         <p class="small">Kéo để đổi thứ tự. Dùng + / - để tăng giảm số lượng in. Bấm vào “Quản lý deck” để lưu/tải/quản lý.</p>
+        <p class="small">Nhấn vào ảnh để xem lớn. Nhấn ESC để đóng.</p>
+        <div id="emptyState" class="empty-state">Chưa có card nào. Kéo thả ảnh hoặc file .ydk để bắt đầu.</div>
         <ul id="previewList" class="preview-list"></ul>
       </section>
 
@@ -191,12 +207,20 @@
       </div>
     </div>
 
+    <!-- Image viewer -->
+    <div id="imageViewer" class="image-viewer hidden" role="dialog" aria-modal="true" aria-label="Xem ảnh">
+      <div class="image-viewer-content">
+        <button id="closeImageViewer" class="btn outline small" aria-label="Đóng">✕</button>
+        <img id="imageViewerImg" alt="Card preview" />
+      </div>
+    </div>
+
     <!-- Overlay kéo thả toàn trang -->
     <div id="pageDropOverlay" class="page-drop-overlay" aria-hidden="true">
       <div class="page-drop-box">
         <div class="page-drop-icon">⬇</div>
-        <div class="page-drop-text">Thả ảnh hoặc link ảnh vào đây</div>
-        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… hoặc URL ảnh trực tiếp)</div>
+        <div class="page-drop-text">Thả ảnh, file .ydk, hoặc link ảnh vào đây</div>
+        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… URL ảnh trực tiếp hoặc deck .ydk)</div>
       </div>
     </div>
 
