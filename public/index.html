@@ -32,6 +32,13 @@
           <input type="file" id="fileInput" accept="image/*,.ydk" multiple hidden />
         </label>
         <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp. File .ydk sẽ tự lấy ảnh theo ID.</p>
+        <div class="format-badges" aria-label="Định dạng hỗ trợ">
+          <span class="badge">.jpg</span>
+          <span class="badge">.png</span>
+          <span class="badge">.webp</span>
+          <span class="badge">.avif</span>
+          <span class="badge">.ydk</span>
+        </div>
         <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
       </section>
 
@@ -137,18 +144,39 @@
           </select>
         </div>
 
+        <div>
+          <label for="shortcutDelete">Phím xoá card (hover)</label>
+          <input type="text" id="shortcutDelete" class="shortcut-input" value="E" maxlength="1" />
+        </div>
+
+        <div>
+          <label for="shortcutInc">Phím tăng số lượng (hover)</label>
+          <input type="text" id="shortcutInc" class="shortcut-input" value="D" maxlength="1" />
+        </div>
+
+        <div>
+          <label for="shortcutDec">Phím giảm số lượng (hover)</label>
+          <input type="text" id="shortcutDec" class="shortcut-input" value="F" maxlength="1" />
+        </div>
+
         <div class="actions">
-          <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
-          <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
-          <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
-          <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
-          <button id="saveDeck" class="btn muted">Lưu deck</button>
-          <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
-          <button id="exportJson" class="btn outline">Xuất JSON</button>
-          <button id="exportYdk" class="btn outline">Xuất YDK</button>
-          <button id="importBtn" class="btn outline">Nhập JSON</button>
-          <input type="file" id="importJson" accept="application/json" hidden />
-          <button id="clearDeck" class="btn danger">Xoá hết</button>
+          <div class="actions-group">
+            <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
+            <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
+            <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
+          </div>
+          <div class="actions-group">
+            <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
+            <button id="saveDeck" class="btn muted">Lưu deck</button>
+            <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
+          </div>
+          <div class="actions-group">
+            <button id="exportJson" class="btn outline">Xuất JSON</button>
+            <button id="exportYdk" class="btn outline">Xuất YDK</button>
+            <button id="importBtn" class="btn outline">Nhập JSON</button>
+            <input type="file" id="importJson" accept="application/json" hidden />
+            <button id="clearDeck" class="btn danger">Xoá hết</button>
+          </div>
         </div>
       </section>
 
@@ -160,6 +188,8 @@
           <span class="pill">Bản in: <strong id="countTotal">0</strong></span>
         </h2>
         <p class="small">Kéo để đổi thứ tự. Dùng + / - để tăng giảm số lượng in. Bấm vào “Quản lý deck” để lưu/tải/quản lý.</p>
+        <p class="small">Nhấn vào ảnh để xem lớn. Nhấn ESC để đóng.</p>
+        <div id="emptyState" class="empty-state">Chưa có card nào. Kéo thả ảnh hoặc file .ydk để bắt đầu.</div>
         <ul id="previewList" class="preview-list"></ul>
       </section>
 

@@ -43,6 +43,7 @@ let currentDeckName = null;
 let lastDocxTestOK = false;
 let undoSnapshot = null;
 let isInternalDrag = false;
+let hoveredCardIndex = null;
 
 /* ---------------- DOM refs ---------------- */
 const dropzone = document.getElementById("dropzone");
@@ -75,6 +76,7 @@ const previewList = document.getElementById("previewList");
 const layoutPreview = document.getElementById("layoutPreview");
 const countUniqueEl = document.getElementById("countUnique");
 const countTotalEl = document.getElementById("countTotal");
+const emptyStateEl = document.getElementById("emptyState");
 
 const exportPdfBtn = document.getElementById("exportPdf");
 const testWordBtn = document.getElementById("testWord");
@@ -93,6 +95,9 @@ const exportJsonBtn = document.getElementById("exportJson");
 const exportYdkBtn = document.getElementById("exportYdk");
 const importJsonBtn = document.getElementById("importBtn");
 const importJsonInput = document.getElementById("importJson");
+const shortcutDeleteInput = document.getElementById("shortcutDelete");
+const shortcutIncInput = document.getElementById("shortcutInc");
+const shortcutDecInput = document.getElementById("shortcutDec");
 
 const updateDeckBtn = document.getElementById("updateDeckBtn");
 const currentDeckNameEl = document.getElementById("currentDeckName");
@@ -139,6 +144,17 @@ function updateCounters() {
   const total = cards.reduce((s, c) => s + (Number(c.qty) || 0), 0);
   if (countUniqueEl) countUniqueEl.textContent = String(unique);
   if (countTotalEl) countTotalEl.textContent = String(total);
+  updateActionButtons();
+}
+
+function updateActionButtons() {
+  if (exportYdkBtn) {
+    const hasYdkCards = cards.some((card) => card.cardId);
+    exportYdkBtn.disabled = !hasYdkCards;
+    exportYdkBtn.title = hasYdkCards
+      ? "Xuất file YDK"
+      : "Chỉ khả dụng khi có card từ .ydk";
+  }
 }
 
 /* ---------------- IndexedDB ---------------- */
@@ -231,6 +247,9 @@ function grabSettings() {
     frontBackMode: frontBackModeSelect.value,
     backFlipMode: backFlipModeSelect.value,
     fileName: fileNameInput.value,
+    shortcutDelete: shortcutDeleteInput?.value,
+    shortcutInc: shortcutIncInput?.value,
+    shortcutDec: shortcutDecInput?.value,
   };
 }
 function applySettings(s) {
@@ -250,6 +269,12 @@ function applySettings(s) {
   if (s.frontBackMode) frontBackModeSelect.value = s.frontBackMode;
   if (s.backFlipMode) backFlipModeSelect.value = s.backFlipMode;
   if (s.fileName) fileNameInput.value = s.fileName;
+  if (shortcutDeleteInput)
+    shortcutDeleteInput.value = (s.shortcutDelete || "E").toUpperCase();
+  if (shortcutIncInput)
+    shortcutIncInput.value = (s.shortcutInc || "D").toUpperCase();
+  if (shortcutDecInput)
+    shortcutDecInput.value = (s.shortcutDec || "F").toUpperCase();
 
   enforceBackSettings();
   drawLayoutPreview();
@@ -276,6 +301,20 @@ function enforceBackSettings() {
     backSection.style.display = "block";
     backFlipModeSelect.disabled = false;
   }
+}
+
+function normalizeShortcutInput(inputEl, fallback) {
+  if (!inputEl) return fallback;
+  const raw = String(inputEl.value || "").trim().toUpperCase();
+  const normalized = raw ? raw[0] : fallback;
+  inputEl.value = normalized;
+  return normalized;
+}
+
+function getShortcutValue(inputEl, fallback) {
+  if (!inputEl) return fallback;
+  const raw = String(inputEl.value || "").trim().toUpperCase();
+  return raw ? raw[0] : fallback;
 }
 
 /* ---------------- Migration from old localStorage ---------------- */
@@ -547,6 +586,28 @@ window.addEventListener("blur", () => {
   pageDragCounter = 0;
   pageDropOverlay.classList.remove("show");
 });
+document.addEventListener("dragend", () => {
+  isInternalDrag = false;
+});
+
+if (shortcutDeleteInput) {
+  shortcutDeleteInput.addEventListener("input", () => {
+    normalizeShortcutInput(shortcutDeleteInput, "E");
+    saveLastSettings();
+  });
+}
+if (shortcutIncInput) {
+  shortcutIncInput.addEventListener("input", () => {
+    normalizeShortcutInput(shortcutIncInput, "D");
+    saveLastSettings();
+  });
+}
+if (shortcutDecInput) {
+  shortcutDecInput.addEventListener("input", () => {
+    normalizeShortcutInput(shortcutDecInput, "F");
+    saveLastSettings();
+  });
+}
 
 /* ---------------- Back image upload ---------------- */
 backInput.addEventListener("change", (e) => {
@@ -564,6 +625,9 @@ backInput.addEventListener("change", (e) => {
 /* ---------------- Render list & reorder ---------------- */
 function renderList() {
   previewList.innerHTML = "";
+  if (emptyStateEl) {
+    emptyStateEl.classList.toggle("hidden", cards.length > 0);
+  }
   cards.forEach((card, index) => {
     const li = document.createElement("li");
     li.className = "preview-item";
@@ -654,6 +718,32 @@ previewList.addEventListener("click", (e) => {
     imageViewer.classList.remove("hidden");
   }
 });
+previewList.addEventListener(
+  "error",
+  (e) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    const item = img.closest(".preview-item");
+    if (!item) return;
+    const idx = Number(item.dataset.index);
+    const card = cards[idx];
+    if (!card || card.errorNotified) return;
+    card.errorNotified = true;
+    alert(`Không tải được ảnh: ${card.name || "unknown"}`);
+  },
+  true
+);
+previewList.addEventListener("mouseover", (e) => {
+  const item = e.target.closest(".preview-item");
+  if (!item) return;
+  hoveredCardIndex = Number(item.dataset.index);
+});
+previewList.addEventListener("mouseout", (e) => {
+  const item = e.target.closest(".preview-item");
+  if (!item) return;
+  if (item.contains(e.relatedTarget)) return;
+  hoveredCardIndex = null;
+});
 previewList.addEventListener("input", (e) => {
   const qtyEl = e.target.closest("[data-qty]");
   if (!qtyEl) return;
@@ -675,6 +765,38 @@ if (imageViewer) {
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && imageViewer) imageViewer.classList.add("hidden");
+});
+
+document.addEventListener("keydown", (e) => {
+  if (isTypingIntoField()) return;
+  if (imageViewer && !imageViewer.classList.contains("hidden")) return;
+  if (hoveredCardIndex === null || hoveredCardIndex === undefined) return;
+  const card = cards[hoveredCardIndex];
+  if (!card) return;
+  const key = e.key.toUpperCase();
+  const delKey = getShortcutValue(shortcutDeleteInput, "E");
+  const incKey = getShortcutValue(shortcutIncInput, "D");
+  const decKey = getShortcutValue(shortcutDecInput, "F");
+  if (key === delKey) {
+    e.preventDefault();
+    snapshot();
+    cards.splice(hoveredCardIndex, 1);
+    renderList();
+    drawLayoutPreview();
+    updateCounters();
+  } else if (key === incKey) {
+    e.preventDefault();
+    snapshot();
+    card.qty += 1;
+    renderList();
+    updateCounters();
+  } else if (key === decKey) {
+    e.preventDefault();
+    snapshot();
+    card.qty = Math.max(1, card.qty - 1);
+    renderList();
+    updateCounters();
+  }
 });
 
 /* ---------------- Settings change handlers ---------------- */
@@ -700,8 +822,11 @@ cardPreset.addEventListener("change", () => {
   cardHInput,
   cropMarksSelect,
   autoFitSelect,
+  shortcutDeleteInput,
+  shortcutIncInput,
+  shortcutDecInput,
 ].forEach((el) =>
-  el.addEventListener("change", () => {
+  el?.addEventListener("change", () => {
     snapshot();
     drawLayoutPreview();
     saveLastSettings();
@@ -905,7 +1030,7 @@ async function printSide_PRENORMALIZED(pdf, dataUrls, opts) {
     const src = dataUrls[i];
     if (src) {
       try {
-        pdf.addImage(src, "JPEG", x, y, cardWmm, cardHmm * 4);
+        pdf.addImage(src, "JPEG", x, y, cardWmm, cardHmm);
       } catch {}
     }
     if (cropMode !== "none") drawCrop(pdf, x, y, cardWmm, cardHmm, cropMode);
@@ -1488,6 +1613,10 @@ importJsonInput.addEventListener("change", (e) => {
   const last = loadLastSettings();
   if (last) applySettings(last);
   else enforceBackSettings();
+
+  if (shortcutDeleteInput) normalizeShortcutInput(shortcutDeleteInput, "E");
+  if (shortcutIncInput) normalizeShortcutInput(shortcutIncInput, "D");
+  if (shortcutDecInput) normalizeShortcutInput(shortcutDecInput, "F");
 
   await migrateOldDecksIfAny();
 
