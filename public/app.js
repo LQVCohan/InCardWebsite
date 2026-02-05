@@ -1041,13 +1041,14 @@ async function printSide_PRENORMALIZED(pdf, dataUrls, opts) {
       x = margin;
       y += cardHmm + gap;
     }
-    if (count === perPage && i !== dataUrls.length - 1) {
+    const hasMore = i < dataUrls.length - 1;
+    if (count === perPage && hasMore) {
       pdf.addPage();
       x = margin;
       y = margin;
       count = 0;
     }
-    if (y + cardHmm + margin > pageH) {
+    if (y + cardHmm + margin > pageH && hasMore) {
       pdf.addPage();
       x = margin;
       y = margin;
@@ -1181,65 +1182,6 @@ exportPdfBtn.addEventListener("click", async () => {
 
   pdf.save((fileNameInput.value || "cards") + ".pdf");
 });
-
-async function printSide_PRENORMALIZED(pdf, dataUrls, opts) {
-  const { cardWmm, cardHmm, margin, gap, cols, rows, cropMode } = opts;
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const perPage = cols * rows;
-
-  let x = margin,
-    y = margin,
-    count = 0;
-  for (let i = 0; i < dataUrls.length; i++) {
-    const src = dataUrls[i];
-    if (src) {
-      try {
-        pdf.addImage(src, "JPEG", x, y, cardWmm, cardHmm);
-      } catch {}
-    }
-    if (cropMode !== "none") drawCrop(pdf, x, y, cardWmm, cardHmm, cropMode);
-
-    count++;
-    x += cardWmm + gap;
-    if (count % cols === 0) {
-      x = margin;
-      y += cardHmm + gap;
-    }
-    if (count === perPage && i !== dataUrls.length - 1) {
-      pdf.addPage();
-      x = margin;
-      y = margin;
-      count = 0;
-    }
-    if (y + cardHmm + margin > pageH) {
-      pdf.addPage();
-      x = margin;
-      y = margin;
-      count = 0;
-    }
-  }
-}
-function drawCrop(pdf, x, y, w, h, mode) {
-  pdf.setDrawColor(120);
-  pdf.setLineWidth(0.18);
-  const len = 3;
-  if (mode === "short") {
-    pdf.line(x, y, x + len, y);
-    pdf.line(x + w - len, y, x + w, y);
-    pdf.line(x, y + h, x + len, y + h);
-    pdf.line(x + w - len, y + h, x + w, y + h);
-    pdf.line(x, y, x, y + len);
-    pdf.line(x, y + h - len, x, y + h);
-    pdf.line(x + w, y, x + w, y + len);
-    pdf.line(x + w, y + h - len, x + w, y + h);
-  } else {
-    pdf.line(x, y, x + w, y);
-    pdf.line(x, y + h, x + w, y + h);
-    pdf.line(x, y, x, y + h);
-    pdf.line(x + w, y, x + w, y + h);
-  }
-}
 
 /* ---------------- DOCX export ---------------- */
 testWordBtn.addEventListener("click", async () => {
