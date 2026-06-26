@@ -8,10 +8,7 @@ const path = require("path");
 
 const app = express();
 const PORT = 3000;
-
-// 1) Static website (./public)
-app.use(cors());
-app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
+const DECKLOG_ORIGIN = "https://decklog-en.bushiroad.com";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -34,37 +31,90 @@ function buildProxyHeaders(targetUrl) {
   return headers;
 }
 
-// 2) Proxy: http://localhost:3000/img?url=...
-// Used for both images and DeckLog HTML/API fetches to avoid CORS and keep remote sites seeing a normal browser-like request.
-app.get("/img", async (req, res) => {
-  const url = req.query.url;
-  if (!url) return res.status(400).send("Missing url");
+function rewriteDeckLogText(text) {
+  return String(text || "")
+    .replace(/https:\/\/decklog-en\.bushiroad\.com/g, "/decklog-proxy")
+    .replace(/https:\/\/decklog\.bushiroad\.com/g, "/decklog-proxy")
+    .replace(/(src|href|action)=(["'])\/(?!\/)/gi, `$1=$2/decklog-proxy/`)
+    .replace(/url\((['"]?)\/(?!\/)/gi, "url($1/decklog-proxy/");
+}
 
+async function proxyRemote(targetUrl, req, res, { rewrite = false } = {}) {
   try {
-    const r = await fetch(url, {
+    const upstream = await fetch(targetUrl, {
       redirect: "follow",
-      headers: buildProxyHeaders(url),
+      headers: buildProxyHeaders(targetUrl),
     });
 
-    if (!r.ok) return res.status(r.status).send(`Upstream error ${r.status}`);
+    if (!upstream.ok) return res.status(upstream.status).send(`Upstream error ${upstream.status}`);
 
-    const ct = r.headers.get("content-type") || "application/octet-stream";
+    const ct = upstream.headers.get("content-type") || "application/octet-stream";
     res.set("Content-Type", ct);
-    res.set("Cache-Control", "public, max-age=3600");
+    res.set("Cache-Control", "public, max-age=300");
+    res.set("Access-Control-Allow-Origin", "*");
 
-    if (r.body && typeof r.body.pipe === "function") {
-      r.body.pipe(res);
+    const shouldRewrite = rewrite && /(text\/html|javascript|ecmascript|text\/css|application\/json)/i.test(ct);
+    if (shouldRewrite) {
+      const text = await upstream.text();
+      return res.send(rewriteDeckLogText(text));
+    }
+
+    if (upstream.body && typeof upstream.body.pipe === "function") {
+      upstream.body.pipe(res);
     } else {
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = Buffer.from(await upstream.arrayBuffer());
       res.end(buf);
     }
   } catch (e) {
-    console.error("Proxy error", e);
+    console.error("Proxy error", targetUrl, e);
     res.status(500).send(`Proxy error: ${e.message}`);
   }
+}
+
+// 1) Static website (./public)
+app.use(cors());
+app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
+
+// 2) Generic proxy: http://localhost:3000/img?url=...
+// Used for direct image downloads and raw DeckLog HTML/API fetches.
+app.get("/img", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send("Missing url");
+  return proxyRemote(url, req, res, { rewrite: false });
 });
 
-// 3) Friendly root message (optional)
+// 3) Same-origin DeckLog proxy.
+// This lets the frontend load DeckLog in a hidden iframe and read the rendered card grid.
+app.use("/decklog-proxy", async (req, res) => {
+  const pathAndQuery = req.originalUrl.replace(/^\/decklog-proxy/, "") || "/";
+  return proxyRemote(`${DECKLOG_ORIGIN}${pathAndQuery}`, req, res, { rewrite: true });
+});
+
+// 4) DeckLog app assets/API often use root-relative paths after the proxied page loads.
+// Keep these paths available on localhost so the hidden iframe can finish rendering.
+[
+  "/api",
+  "/ajax",
+  "/assets",
+  "/build",
+  "/css",
+  "/fonts",
+  "/images",
+  "/img",
+  "/js",
+  "/packs",
+  "/rails",
+  "/storage",
+  "/system",
+].forEach((prefix) => {
+  if (prefix === "/img") return;
+  app.use(prefix, async (req, res, next) => {
+    if (req.method !== "GET") return next();
+    return proxyRemote(`${DECKLOG_ORIGIN}${req.originalUrl}`, req, res, { rewrite: true });
+  });
+});
+
+// 5) Friendly root message (optional)
 app.get("/", (req, res) => {
   res.send('✅ Server running. Open <a href="/index.html">/index.html</a> or use /img?url=...');
 });
