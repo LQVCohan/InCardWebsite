@@ -2,7 +2,7 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <title>Card Printer Pro</title>
+    <title>Card Printer Pro - Yu-Gi-Oh! Edition</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <link rel="stylesheet" href="style.css" />
@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <div class="brand-logo" aria-hidden="true">🃏</div>
+        <div class="brand-logo" aria-hidden="true">👁️</div>
         <div>
           <h1>Card Printer Pro</h1>
           <p>In card TCG / Yu-Gi-Oh / Digimon – chạy offline.</p>
@@ -23,7 +23,6 @@
     </header>
 
     <main class="container">
-      <!-- Uploader mặt trước -->
       <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
         <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào đây</strong></p>
         <p class="drop-sub">hoặc</p>
@@ -42,7 +41,6 @@
         <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
       </section>
 
-      <!-- Uploader mặt sau (ẩn/hiện theo chế độ) -->
       <section class="uploader small-uploader" id="backSection" style="display:none">
         <p><strong>Ảnh mặt sau</strong></p>
         <label class="btn" for="backInput">
@@ -52,13 +50,12 @@
         <p id="backInfo" class="hint">Chưa chọn mặt sau.</p>
       </section>
 
-      <!-- Controls -->
       <section class="controls" aria-label="Thiết lập in">
         <div>
           <label for="cardPreset">Kích thước card</label>
           <select id="cardPreset">
             <option value="63x88">TCG 63×88 mm</option>
-            <option value="59x86">Yu-Gi-Oh 59×86 mm</option>
+            <option value="59x86" selected>Yu-Gi-Oh 59×86 mm</option>
             <option value="70x120">70×120 mm</option>
             <option value="custom">Tùy chỉnh</option>
           </select>
@@ -148,98 +145,78 @@
           <label for="shortcutDelete">Phím xoá card (hover)</label>
           <input type="text" id="shortcutDelete" class="shortcut-input" value="E" maxlength="1" />
         </div>
-
         <div>
           <label for="shortcutInc">Phím tăng số lượng (hover)</label>
           <input type="text" id="shortcutInc" class="shortcut-input" value="D" maxlength="1" />
         </div>
-
         <div>
           <label for="shortcutDec">Phím giảm số lượng (hover)</label>
           <input type="text" id="shortcutDec" class="shortcut-input" value="F" maxlength="1" />
         </div>
+      </section>
 
-        <div class="actions">
-          <div class="actions-group">
-            <button id="exportPdf" class="btn primary" title="Xuất PDF 9 card/trang">Xuất PDF</button>
-            <button id="testWord" class="btn outline" title="Tạo file test DOCX">Test Word</button>
-            <button id="exportDocx" class="btn secondary" title="Xuất DOCX (Word)">Xuất DOCX</button>
-          </div>
-          <div class="actions-group">
-            <button id="undoBtn" class="btn outline" title="Hoàn tác 1 bước">↶ Hoàn tác</button>
-            <button id="saveDeck" class="btn muted">Lưu deck</button>
-            <button id="manageDeck" class="btn outline">📁 Quản lý deck</button>
-          </div>
-          <div class="actions-group">
-            <button id="exportJson" class="btn outline">Xuất JSON</button>
-            <button id="exportYdk" class="btn outline">Xuất YDK</button>
-            <button id="importBtn" class="btn outline">Nhập JSON</button>
-            <input type="file" id="importJson" accept="application/json" hidden />
-            <button id="clearDeck" class="btn danger">Xoá hết</button>
-          </div>
+      <section class="preview-section">
+        <canvas id="layoutPreview" width="800" height="1131" aria-label="Xem trước layout in"></canvas>
+      </section>
+
+      <section class="actions">
+        <div class="action-group">
+          <button id="exportPdf" class="btn primary">📥 Xuất PDF (in)</button>
+          <button id="exportDocx" class="btn primary">📝 Xuất DOCX (Word)</button>
+          <button id="testWord" class="btn outline small" title="Tải file DOCX mẫu test xem Word của bạn có lỗi không">Test DOCX</button>
+        </div>
+
+        <div class="action-group">
+          <button id="saveDeck" class="btn">💾 Lưu Deck Mới</button>
+          <button id="manageDeck" class="btn outline">📂 Quản lý Deck</button>
+        </div>
+
+        <div class="action-group">
+          <button id="undoBtn" class="btn outline">↩ Hoàn tác</button>
+        </div>
+
+        <div class="action-group">
+          <button id="exportYdk" class="btn outline" disabled title="Chỉ khả dụng khi có card từ .ydk">⬆ Xuất .ydk</button>
+          <button id="exportJson" class="btn outline">⬆ Xuất .json</button>
+          <button id="importBtn" class="btn outline">⬇ Nhập .json</button>
+          <input type="file" id="importJson" accept="application/json" hidden />
         </div>
       </section>
 
-      <!-- Danh sách -->
-      <section>
-        <h2 style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-          Danh sách card
-          <span class="pill">Ảnh duy nhất: <strong id="countUnique">0</strong></span>
-          <span class="pill">Bản in: <strong id="countTotal">0</strong></span>
-        </h2>
-        <p class="small">Kéo để đổi thứ tự. Dùng + / - để tăng giảm số lượng in. Bấm vào “Quản lý deck” để lưu/tải/quản lý.</p>
-        <p class="small">Nhấn vào ảnh để xem lớn. Nhấn ESC để đóng.</p>
-        <div id="emptyState" class="empty-state">Chưa có card nào. Kéo thả ảnh hoặc file .ydk để bắt đầu.</div>
-        <ul id="previewList" class="preview-list"></ul>
-      </section>
+      <div class="stats">
+        Card khác nhau: <strong id="countUnique">0</strong> | 
+        Tổng số in: <strong id="countTotal">0</strong>
+      </div>
 
-      <!-- Preview bố cục -->
-      <section class="preview-panel">
-        <h3>Preview bố cục</h3>
-        <canvas id="layoutPreview" width="210" height="297" aria-label="Sơ đồ trang in"></canvas>
-        <p class="hint">In ở 100% / Actual size để đúng mm. PDF/DOCX mới là chuẩn để in.</p>
-      </section>
+      <ul id="previewList" class="preview-list"></ul>
+      <p id="emptyState" class="empty-state">Chưa có thẻ bài nào.</p>
     </main>
 
-    <footer class="footer">
-      <p>Tip: Dán (Ctrl + V) ảnh hoặc URL. Khi in 2 mặt, chỉ kéo/đặt ảnh mặt sau trong ô “Ảnh mặt sau”.</p>
-    </footer>
+    <div id="pageDropOverlay" class="page-drop-overlay">
+      <div class="overlay-content">Thả ảnh vào đây</div>
+    </div>
 
-    <!-- Modal Quản lý Deck -->
-    <div id="deckManager" class="deck-modal hidden" role="dialog" aria-modal="true" aria-labelledby="deckModalTitle">
-      <div class="deck-modal-content">
-        <h3 id="deckModalTitle">📚 Quản lý Deck</h3>
-        <div id="deckList" class="deck-list" aria-live="polite"></div>
-
-        <div class="deck-add">
+    <div id="deckManager" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h2>Quản lý Deck đã lưu (IndexedDB)</h2>
+        <div class="new-deck-form">
           <input type="text" id="newDeckName" placeholder="Tên deck mới..." />
-          <button id="createDeckBtn" class="btn primary">Tạo mới</button>
+          <button id="createDeckBtn" class="btn">Tạo mới / Lưu đè</button>
         </div>
-
-        <div class="modal-footer">
-          <button id="closeDeckManager" class="btn muted">Đóng</button>
+        <ul id="deckList" class="deck-list"></ul>
+        <div class="modal-actions">
+          <button id="closeDeckManager" class="btn outline">Đóng</button>
         </div>
       </div>
     </div>
 
-    <!-- Image viewer -->
-    <div id="imageViewer" class="image-viewer hidden" role="dialog" aria-modal="true" aria-label="Xem ảnh">
-      <div class="image-viewer-content">
-        <button id="closeImageViewer" class="btn outline small" aria-label="Đóng">✕</button>
-        <img id="imageViewerImg" alt="Card preview" />
+    <div id="imageViewer" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-content viewer-content">
+        <button id="closeImageViewer" class="close-viewer" aria-label="Đóng">×</button>
+        <img id="imageViewerImg" src="" alt="Zoom" />
       </div>
     </div>
 
-    <!-- Overlay kéo thả toàn trang -->
-    <div id="pageDropOverlay" class="page-drop-overlay" aria-hidden="true">
-      <div class="page-drop-box">
-        <div class="page-drop-icon">⬇</div>
-        <div class="page-drop-text">Thả ảnh, file .ydk, hoặc link ảnh vào đây</div>
-        <div class="page-drop-sub">(.jpg .png .webp .gif .avif… URL ảnh trực tiếp hoặc deck .ydk)</div>
-      </div>
-    </div>
-
-    <!-- Loader thư viện auto online/offline -->
     <script>
       (async () => {
         const loadScript = (src) => new Promise((res, rej) => {
@@ -263,20 +240,20 @@
           for (const url of list) {
             try { await loadScript(url); return; } catch {}
           }
-          await loadScript(fallback);
+          if (fallback) {
+            try { await loadScript(fallback); console.log("Loaded offline fallback:", fallback); } 
+            catch { console.error("Could not load lib:", fallback); }
+          }
         };
 
-        if (!navigator.onLine) {
-          await loadScript(DOCX_LOCAL);
-          await loadScript(JSPDF_LOCAL);
-        } else {
-          await tryMany(DOCX_CDN, DOCX_LOCAL);
-          await tryMany(JSPDF_CDN, JSPDF_LOCAL);
-        }
+        await Promise.all([
+          tryMany(DOCX_CDN, DOCX_LOCAL),
+          tryMany(JSPDF_CDN, JSPDF_LOCAL)
+        ]);
+        
+        // Sau khi load xong thư viện mới chạy app chính
+        await loadScript("app.js");
       })();
     </script>
-
-    <!-- Script chính -->
-    <script src="app.js"></script>
   </body>
 </html>
