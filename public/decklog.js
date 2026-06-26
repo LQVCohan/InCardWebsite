@@ -1,10 +1,9 @@
 /* =============================================================
-  Universal import panel for Card Printer Pro
-  - Direct image URL import
-  - Multiple image URLs, one per line
-  - Deck text lines such as: 2x CARD_CODE or CARD_CODE 2
-  - Best-effort DeckLog link/code reader when public data is available
-  - ZIP download for imported image entries
+  DeckLog importer for Card Printer Pro
+  - DeckLog code/link input only
+  - Tries official DeckLog view/API pages and runtime-discovered API URLs
+  - Imports found card images into the existing print list with exact qty
+  - ZIP download for imported DeckLog image entries
   ============================================================= */
 (function () {
   const DECKLOG_PROXY_URL = "http://localhost:3000/img?url=";
@@ -12,6 +11,8 @@
     "https://decklog-en.bushiroad.com",
     "https://decklog.bushiroad.com",
   ];
+  const MAX_DECKLOG_FETCHES = 70;
+  const MAX_SCRIPT_DISCOVERY = 8;
 
   let lastDeckLogEntries = [];
   let lastDeckLogName = "decklog";
@@ -22,13 +23,13 @@
     panel.id = "decklogPanel";
     panel.className = "uploader small-uploader";
     panel.innerHTML = `
-      <p><strong>Nhập link / DeckLog / danh sách ảnh</strong></p>
+      <p><strong>Nhập DeckLog</strong></p>
       <div class="decklog-import-row">
-        <input id="decklogInput" type="text" placeholder="Dán link ảnh, nhiều link ảnh, DeckLog code/link hoặc text deck..." />
-        <button id="decklogImportBtn" class="btn primary">Nhập vào danh sách</button>
+        <input id="decklogInput" type="text" placeholder="Dán DeckLog code hoặc link /view/..." />
+        <button id="decklogImportBtn" class="btn primary">Nhập DeckLog</button>
         <button id="decklogZipBtn" class="btn outline">Tải ZIP ảnh</button>
       </div>
-      <p id="decklogStatus" class="hint">Ưu tiên tốt nhất: link ảnh trực tiếp hoặc nhiều link ảnh mỗi dòng. DeckLog share link sẽ được thử đọc nếu có dữ liệu công khai.</p>
+      <p id="decklogStatus" class="hint">Ô này chỉ dành cho DeckLog. Link ảnh trực tiếp hãy dán/kéo vào vùng nhập ảnh phía trên hoặc thả vào toàn trang.</p>
     `;
 
     const controls = document.querySelector(".controls");
@@ -78,7 +79,7 @@
 
   function safeFileName(name) {
     return String(name || "card")
-      .replace(/[\\/:*?"<>|]+/g, "_")
+      .replace(/[\/:*?"<>|]+/g, "_")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 80) || "card";
@@ -98,11 +99,17 @@
     return /^https?:\/\/(decklog-en\.)?bushiroad\.com/i.test(String(url || ""));
   }
 
-  function isProbablyImageUrl(url) {
+  function isDirectImageUrl(url) {
     const value = String(url || "").trim();
-    if (!/^https?:\/\//i.test(value)) return false;
-    if (isDeckLogUrl(value)) return false;
-    return /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(value) || /image|img|card|thumb|cdn|assets/i.test(value);
+    return /^https?:\/\//i.test(value) && !isDeckLogUrl(value) && /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(value);
+  }
+
+  function hasDirectImageInput(input) {
+    return extractUrls(input).some(isDirectImageUrl);
+  }
+
+  function extractUrls(text) {
+    return String(text || "").match(/https?:\/\/[^\s"'<>]+/gi) || [];
   }
 
   function absolutize(url, baseUrl) {
@@ -111,47 +118,6 @@
     } catch {
       return url;
     }
-  }
-
-  function extractUrls(text) {
-    return String(text || "").match(/https?:\/\/[^\s"'<>]+/gi) || [];
-  }
-
-  function parseDirectImageLinks(text) {
-    const entries = [];
-    const lines = String(text || "").split(/\r?\n/);
-    for (const lineRaw of lines) {
-      const line = lineRaw.trim();
-      if (!line) continue;
-      const urls = extractUrls(line).filter(isProbablyImageUrl);
-      if (!urls.length) continue;
-      const qtyPrefix = line.match(/^([0-9]{1,3})\s*[x×*]?\s+/i);
-      const qtySuffix = line.match(/\s+[x×*]?\s*([0-9]{1,3})$/i);
-      const qty = normalizeQty(qtyPrefix?.[1] || qtySuffix?.[1] || 1);
-      for (const url of urls) {
-        entries.push({
-          qty,
-          code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-          name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-          src: url,
-          sourceUrl: url,
-        });
-      }
-    }
-
-    if (!entries.length) {
-      const urls = extractUrls(text).filter(isProbablyImageUrl);
-      for (const url of urls) {
-        entries.push({
-          qty: 1,
-          code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-          name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-          src: url,
-          sourceUrl: url,
-        });
-      }
-    }
-    return normalizeEntries(entries);
   }
 
   function extractDeckLogCode(input) {
@@ -181,20 +147,37 @@
       `/view/${encoded}`,
       `/deck/${encoded}`,
       `/deckview/${encoded}`,
+      `/recipe/${encoded}`,
       `/${encoded}`,
+      `/api/view/${encoded}`,
+      `/api/view?deck_code=${encoded}`,
+      `/api/view?code=${encoded}`,
       `/api/deck/${encoded}`,
       `/api/decks/${encoded}`,
+      `/api/deck/view/${encoded}`,
       `/api/deck?code=${encoded}`,
       `/api/deck?id=${encoded}`,
       `/api/deck?deck_code=${encoded}`,
       `/api/decklog/${encoded}`,
       `/api/decklog?code=${encoded}`,
-      `/api/deck/recipe/${encoded}`,
+      `/api/decklog?deck_code=${encoded}`,
+      `/api/deck_log/${encoded}`,
+      `/api/deck_log?deck_code=${encoded}`,
+      `/api/recipe/${encoded}`,
+      `/api/recipes/${encoded}`,
+      `/api/recipes?deck_code=${encoded}`,
+      `/system/app/api/view/${encoded}`,
+      `/system/app/api/view?deck_code=${encoded}`,
       `/system/app/api/deck/${encoded}`,
       `/system/app/api/deck?code=${encoded}`,
+      `/system/app/api/deck?deck_code=${encoded}`,
       `/system/app/api/deck/show?deck_code=${encoded}`,
       `/system/app/api/deck/show?id=${encoded}`,
+      `/system/app/api/decklog/show?deck_code=${encoded}`,
+      `/system/app/api/deck_log/show?deck_code=${encoded}`,
       `/ajax/deck?deck_code=${encoded}`,
+      `/ajax/decklog?deck_code=${encoded}`,
+      `/ajax/view?deck_code=${encoded}`,
     ];
 
     for (const domain of DECKLOG_DOMAINS) {
@@ -227,6 +210,69 @@
     const proxied = await fetch(proxifyDeckLog(url), { redirect: "follow" });
     if (!proxied.ok) throw new Error(`Không tải được ảnh: ${url}`);
     return await proxied.blob();
+  }
+
+  function extractScriptUrls(html, baseUrl) {
+    const scripts = [];
+    const pattern = /<script[^>]+src=["']([^"']+\.js[^"']*)["'][^>]*>/gi;
+    let match;
+    while ((match = pattern.exec(String(html || "")))) {
+      scripts.push(absolutize(unescapeHtml(match[1]), baseUrl));
+    }
+    return uniq(scripts);
+  }
+
+  function buildUrlVariants(rawPath, baseUrl, code) {
+    if (!rawPath || /\$\{|\{\{|\+|\[object/i.test(rawPath)) return [];
+    let path = rawPath.replace(/\\u002F/g, "/").replace(/&amp;/g, "&");
+    if (!/^https?:\/\//i.test(path) && !path.startsWith("/")) return [];
+    if (/\.(png|jpe?g|webp|gif|svg|css|map)(\?|$)/i.test(path)) return [];
+    const encoded = encodeURIComponent(code);
+    const base = absolutize(path, baseUrl);
+    const urls = [base];
+
+    try {
+      const u = new URL(base);
+      const hasDeckParam = [...u.searchParams.keys()].some((key) => /deck|code|id/i.test(key));
+      if (!hasDeckParam) {
+        for (const key of ["deck_code", "code", "deck", "id"]) {
+          const copy = new URL(u.href);
+          copy.searchParams.set(key, code);
+          urls.push(copy.href);
+        }
+      }
+      if (!u.pathname.endsWith(`/${encoded}`)) urls.push(`${u.origin}${u.pathname.replace(/\/$/, "")}/${encoded}${u.search || ""}`);
+    } catch {}
+
+    return urls;
+  }
+
+  function discoverCandidateUrlsFromText(text, baseUrl, code) {
+    const discovered = [];
+    const source = String(text || "");
+    const quotedPathPattern = /["'`]([^"'`]{1,220}(?:api|deck|Deck|recipe|Recipe|view|View)[^"'`]{0,220})["'`]/g;
+    let match;
+    while ((match = quotedPathPattern.exec(source))) {
+      discovered.push(...buildUrlVariants(match[1], baseUrl, code));
+    }
+    return uniq(discovered);
+  }
+
+  async function discoverFromHtmlOrScript(text, sourceUrl, code, scriptBudget) {
+    const discovered = discoverCandidateUrlsFromText(text, sourceUrl, code);
+    const scriptUrls = extractScriptUrls(text, sourceUrl).slice(0, scriptBudget.count);
+    scriptBudget.count -= scriptUrls.length;
+
+    for (const scriptUrl of scriptUrls) {
+      try {
+        setDeckLogStatus(`Đang dò API DeckLog từ script...`);
+        const scriptText = await fetchTextWithFallback(scriptUrl);
+        discovered.push(...discoverCandidateUrlsFromText(scriptText, scriptUrl, code));
+      } catch (error) {
+        console.warn("Không đọc được script DeckLog", scriptUrl, error);
+      }
+    }
+    return uniq(discovered);
   }
 
   function parseJsonLoose(text) {
@@ -372,12 +418,27 @@
     return normalizeEntries(entries);
   }
 
+  function parseImageLinksFromFetchedText(text) {
+    const entries = [];
+    const urls = extractUrls(text).filter((url) => /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(url) && !/logo|icon|favicon|sprite/i.test(url));
+    for (const url of urls) {
+      entries.push({
+        qty: 1,
+        code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+        name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+        src: url,
+        sourceUrl: url,
+      });
+    }
+    return normalizeEntries(entries);
+  }
+
   function normalizeEntries(entries) {
     const map = new Map();
     for (const entry of entries) {
       const code = String(entry.code || "").trim();
       const src = String(entry.src || "").trim();
-      const name = String(entry.name || code || src || "Imported card").trim();
+      const name = String(entry.name || code || src || "DeckLog card").trim();
       if (!code && !src && !name) continue;
       const key = src || code || name;
       const current = map.get(key);
@@ -415,32 +476,49 @@
 
   async function resolveDeckLog(input) {
     const raw = String(input || "").trim();
-    if (!raw) throw new Error("Bạn chưa nhập link ảnh, DeckLog code/link hoặc text deck.");
-
-    const imageLinks = parseDirectImageLinks(raw);
-    if (imageLinks.length) return withImageCandidates(imageLinks);
+    if (!raw) throw new Error("Bạn chưa nhập DeckLog code/link.");
+    if (hasDirectImageInput(raw)) {
+      throw new Error("Ô này chỉ nhập DeckLog. Link ảnh hãy dán/kéo vào vùng nhập ảnh phía trên hoặc thả vào toàn trang.");
+    }
 
     const pasted = parseDeckTextLines(raw);
     if (pasted.length > 1) return withImageCandidates(pasted);
 
     const code = extractDeckLogCode(raw);
-    const urls = buildDeckLogCandidateUrls(raw);
+    if (!code) throw new Error("Không nhận diện được DeckLog code/link.");
+
+    const queue = buildDeckLogCandidateUrls(raw);
+    const seen = new Set();
     const errors = [];
-    for (const url of urls) {
+    const scriptBudget = { count: MAX_SCRIPT_DISCOVERY };
+    let fetchCount = 0;
+
+    while (queue.length && fetchCount < MAX_DECKLOG_FETCHES) {
+      const url = queue.shift();
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      fetchCount += 1;
+
       try {
-        setDeckLogStatus(`Đang thử đọc DeckLog: ${url}`);
+        setDeckLogStatus(`Đang đọc DeckLog ${code} (${fetchCount}/${Math.min(MAX_DECKLOG_FETCHES, fetchCount + queue.length)})...`);
         const text = await fetchTextWithFallback(url);
         const json = parseJsonLoose(text);
         let entries = json ? collectCardEntriesFromJson(json, url) : [];
-        if (!entries.length) entries = parseDirectImageLinks(text);
+        if (!entries.length) entries = parseImageLinksFromFetchedText(text);
         if (!entries.length) entries = parseDeckTextLines(text);
         if (entries.length) return withImageCandidates(entries);
+
+        const discovered = await discoverFromHtmlOrScript(text, url, code, scriptBudget);
+        for (const candidate of discovered) {
+          if (!seen.has(candidate) && queue.length < MAX_DECKLOG_FETCHES) queue.push(candidate);
+        }
       } catch (error) {
         errors.push(`${url}: ${error.message}`);
       }
     }
+
     console.warn("DeckLog resolve errors", errors);
-    throw new Error(`Không đọc được DeckLog ${code ? `(${code}) ` : ""}từ link/code này. DeckLog có thể không trả dữ liệu công khai; hãy dán link ảnh trực tiếp, nhiều link ảnh mỗi dòng, hoặc text export của deck.`);
+    throw new Error(`Không đọc được DeckLog (${code}). Trang DeckLog có thể không mở dữ liệu deck qua request thường; hãy thử link share /view đầy đủ hoặc text export của DeckLog.`);
   }
 
   function withImageCandidates(entries) {
@@ -453,13 +531,13 @@
   async function importDeckLogFromInput(input) {
     if (!requirePrinterApi()) return;
     try {
-      setDeckLogStatus("Đang đọc dữ liệu nhập...");
+      setDeckLogStatus("Đang đọc DeckLog...");
       const entries = await resolveDeckLog(input);
-      if (!entries.length) throw new Error("Không có card/link ảnh hợp lệ để nhập.");
+      if (!entries.length) throw new Error("DeckLog không có card hợp lệ.");
       if (typeof snapshot === "function") snapshot();
 
       const importedCards = entries.map((entry) => ({
-        name: entry.name || entry.code || "Imported card",
+        name: entry.name || entry.code || "DeckLog card",
         src: entry.src,
         qty: normalizeQty(entry.qty),
         external: true,
@@ -474,12 +552,12 @@
       updateCounters();
 
       lastDeckLogEntries = entries;
-      lastDeckLogName = extractDeckLogCode(input) || "imported";
+      lastDeckLogName = extractDeckLogCode(input) || "decklog";
       const total = entries.reduce((sum, entry) => sum + normalizeQty(entry.qty), 0);
-      setDeckLogStatus(`Đã nhập ${entries.length} loại card/link / ${total} bản in.`);
+      setDeckLogStatus(`Đã nhập ${entries.length} loại card / ${total} bản in. Có thể bấm Xuất PDF/DOCX để tạo file in.`);
     } catch (error) {
       console.error(error);
-      setDeckLogStatus(error.message || "Nhập thất bại.", true);
+      setDeckLogStatus(error.message || "Nhập DeckLog thất bại.", true);
     }
   }
 
@@ -488,12 +566,12 @@
       let entries = lastDeckLogEntries;
       const code = extractDeckLogCode(input);
       if (!entries.length || (code && code !== lastDeckLogName)) {
-        setDeckLogStatus("Đang đọc dữ liệu để tải ZIP...");
+        setDeckLogStatus("Đang đọc DeckLog để tải ZIP...");
         entries = await resolveDeckLog(input);
         lastDeckLogEntries = entries;
-        lastDeckLogName = code || "imported";
+        lastDeckLogName = code || "decklog";
       }
-      if (!entries.length) throw new Error("Không có ảnh để tải ZIP.");
+      if (!entries.length) throw new Error("Không có card DeckLog để tải ZIP.");
       await downloadImagesAsZip(entries, lastDeckLogName);
     } catch (error) {
       console.error(error);
@@ -520,7 +598,7 @@
     const zipBlob = makeZipBlob(files);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(zipBlob);
-    a.download = `${safeFileName(deckName || "imported")}_images.zip`;
+    a.download = `${safeFileName(deckName || "decklog")}_images.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     setDeckLogStatus(`Đã tạo ZIP gồm ${files.length} file ảnh.`);
