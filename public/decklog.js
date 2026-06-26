@@ -1,24 +1,25 @@
 /* =============================================================
   DeckLog importer for Card Printer Pro
   - DeckLog code/link input only
-  - Tries official DeckLog view/API pages and runtime-discovered API URLs
-  - Imports found card images into the existing print list with exact qty
-  - ZIP download for imported DeckLog image entries
+  - Does NOT import DeckLog overview/share screenshots as a card
+  - Imports individual card entries with exact quantity when deck data is readable
   ============================================================= */
 (function () {
-  const DECKLOG_PROXY_URL = "http://localhost:3000/img?url=";
+  const PROXY_URL = "http://localhost:3000/img?url=";
   const DECKLOG_DOMAINS = [
     "https://decklog-en.bushiroad.com",
     "https://decklog.bushiroad.com",
   ];
-  const MAX_DECKLOG_FETCHES = 70;
-  const MAX_SCRIPT_DISCOVERY = 8;
+  const MAX_FETCHES = 90;
+  const MAX_SCRIPTS = 10;
+  const MIN_IMAGE_URLS_FOR_DECK = 8;
 
-  let lastDeckLogEntries = [];
-  let lastDeckLogName = "decklog";
+  let lastEntries = [];
+  let lastDeckName = "decklog";
 
   function installDeckLogPanel() {
     if (document.getElementById("decklogPanel")) return;
+
     const panel = document.createElement("section");
     panel.id = "decklogPanel";
     panel.className = "uploader small-uploader";
@@ -38,18 +39,14 @@
     else container?.prepend(panel);
 
     const input = panel.querySelector("#decklogInput");
-    panel.querySelector("#decklogImportBtn")?.addEventListener("click", () => {
-      importDeckLogFromInput(input.value);
-    });
-    panel.querySelector("#decklogZipBtn")?.addEventListener("click", () => {
-      downloadDeckLogZipFromInput(input.value);
-    });
+    panel.querySelector("#decklogImportBtn")?.addEventListener("click", () => importDeckLog(input.value));
+    panel.querySelector("#decklogZipBtn")?.addEventListener("click", () => downloadDeckZip(input.value));
     input?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) importDeckLogFromInput(input.value);
+      if (event.key === "Enter" && !event.shiftKey) importDeckLog(input.value);
     });
   }
 
-  function setDeckLogStatus(message, isError = false) {
+  function setStatus(message, isError = false) {
     const el = document.getElementById("decklogStatus");
     if (!el) return;
     el.textContent = message;
@@ -64,22 +61,22 @@
       return true;
     } catch (error) {
       console.error(error);
-      setDeckLogStatus("Không tìm thấy API danh sách card của app chính.", true);
+      setStatus("Không tìm thấy API danh sách card của app chính.", true);
       return false;
     }
-  }
-
-  function proxifyDeckLog(url) {
-    return DECKLOG_PROXY_URL + encodeURIComponent(url);
   }
 
   function uniq(list) {
     return [...new Set((list || []).filter(Boolean))];
   }
 
+  function proxy(url) {
+    return PROXY_URL + encodeURIComponent(url);
+  }
+
   function safeFileName(name) {
     return String(name || "card")
-      .replace(/[\/:*?"<>|]+/g, "_")
+      .replace(/[\\/:*?"<>|]+/g, "_")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 80) || "card";
@@ -89,38 +86,37 @@
     return String(num).padStart(width, "0");
   }
 
-  function normalizeQty(value) {
+  function qty(value) {
     const n = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
     if (!Number.isFinite(n)) return 1;
     return Math.max(1, Math.floor(n));
   }
 
-  function isDeckLogUrl(url) {
-    return /^https?:\/\/(decklog-en\.)?bushiroad\.com/i.test(String(url || ""));
-  }
-
-  function isDirectImageUrl(url) {
-    const value = String(url || "").trim();
-    return /^https?:\/\//i.test(value) && !isDeckLogUrl(value) && /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(value);
-  }
-
-  function hasDirectImageInput(input) {
-    return extractUrls(input).some(isDirectImageUrl);
-  }
-
-  function extractUrls(text) {
+  function urlsFrom(text) {
     return String(text || "").match(/https?:\/\/[^\s"'<>]+/gi) || [];
   }
 
-  function absolutize(url, baseUrl) {
+  function isDeckLogUrl(value) {
+    return /^https?:\/\/(decklog-en\.)?bushiroad\.com/i.test(String(value || ""));
+  }
+
+  function isDirectImageUrl(value) {
+    return /^https?:\/\//i.test(String(value || "")) && !isDeckLogUrl(value) && /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(String(value));
+  }
+
+  function hasDirectImageInput(input) {
+    return urlsFrom(input).some(isDirectImageUrl);
+  }
+
+  function abs(url, base) {
     try {
-      return new URL(url, baseUrl || location.href).href;
+      return new URL(url, base || location.href).href;
     } catch {
       return url;
     }
   }
 
-  function extractDeckLogCode(input) {
+  function extractDeckCode(input) {
     const raw = String(input || "").trim();
     if (!raw) return "";
     try {
@@ -129,16 +125,16 @@
         const value = url.searchParams.get(key);
         if (value) return value.trim();
       }
-      const parts = url.pathname.split("/").map((p) => p.trim()).filter(Boolean);
+      const parts = url.pathname.split("/").map((part) => part.trim()).filter(Boolean);
       return decodeURIComponent(parts[parts.length - 1] || raw).trim();
     } catch {
       return raw.split(/\s+/)[0].trim();
     }
   }
 
-  function buildDeckLogCandidateUrls(input) {
+  function candidateDeckUrls(input) {
     const raw = String(input || "").trim();
-    const code = extractDeckLogCode(raw);
+    const code = extractDeckCode(raw);
     const encoded = encodeURIComponent(code);
     const urls = [];
     if (/^https?:\/\//i.test(raw)) urls.push(raw);
@@ -148,19 +144,18 @@
       `/deck/${encoded}`,
       `/deckview/${encoded}`,
       `/recipe/${encoded}`,
-      `/${encoded}`,
       `/api/view/${encoded}`,
       `/api/view?deck_code=${encoded}`,
       `/api/view?code=${encoded}`,
       `/api/deck/${encoded}`,
       `/api/decks/${encoded}`,
       `/api/deck/view/${encoded}`,
+      `/api/deck?deck_code=${encoded}`,
       `/api/deck?code=${encoded}`,
       `/api/deck?id=${encoded}`,
-      `/api/deck?deck_code=${encoded}`,
       `/api/decklog/${encoded}`,
-      `/api/decklog?code=${encoded}`,
       `/api/decklog?deck_code=${encoded}`,
+      `/api/decklog?code=${encoded}`,
       `/api/deck_log/${encoded}`,
       `/api/deck_log?deck_code=${encoded}`,
       `/api/recipe/${encoded}`,
@@ -169,15 +164,13 @@
       `/system/app/api/view/${encoded}`,
       `/system/app/api/view?deck_code=${encoded}`,
       `/system/app/api/deck/${encoded}`,
-      `/system/app/api/deck?code=${encoded}`,
       `/system/app/api/deck?deck_code=${encoded}`,
       `/system/app/api/deck/show?deck_code=${encoded}`,
-      `/system/app/api/deck/show?id=${encoded}`,
       `/system/app/api/decklog/show?deck_code=${encoded}`,
       `/system/app/api/deck_log/show?deck_code=${encoded}`,
+      `/ajax/view?deck_code=${encoded}`,
       `/ajax/deck?deck_code=${encoded}`,
       `/ajax/decklog?deck_code=${encoded}`,
-      `/ajax/view?deck_code=${encoded}`,
     ];
 
     for (const domain of DECKLOG_DOMAINS) {
@@ -186,51 +179,46 @@
     return uniq(urls);
   }
 
-  async function fetchTextWithFallback(url) {
+  async function fetchText(url) {
     try {
       const direct = await fetch(url, { mode: "cors", redirect: "follow" });
       if (direct.ok) return await direct.text();
     } catch {}
-
-    const proxied = await fetch(proxifyDeckLog(url), { redirect: "follow" });
+    const proxied = await fetch(proxy(url), { redirect: "follow" });
     if (!proxied.ok) throw new Error(`HTTP ${proxied.status}`);
     return await proxied.text();
   }
 
-  async function fetchBlobWithDeckLogFallback(url) {
+  async function fetchBlob(url) {
     if (typeof fetchBlobWithFallback === "function") {
-      try {
-        return await fetchBlobWithFallback(url);
-      } catch {}
+      try { return await fetchBlobWithFallback(url); } catch {}
     }
     try {
       const direct = await fetch(url, { mode: "cors", redirect: "follow" });
       if (direct.ok) return await direct.blob();
     } catch {}
-    const proxied = await fetch(proxifyDeckLog(url), { redirect: "follow" });
+    const proxied = await fetch(proxy(url), { redirect: "follow" });
     if (!proxied.ok) throw new Error(`Không tải được ảnh: ${url}`);
     return await proxied.blob();
   }
 
-  function extractScriptUrls(html, baseUrl) {
-    const scripts = [];
-    const pattern = /<script[^>]+src=["']([^"']+\.js[^"']*)["'][^>]*>/gi;
+  function scriptUrls(html, baseUrl) {
+    const urls = [];
+    const re = /<script[^>]+src=["']([^"']+\.js[^"']*)["'][^>]*>/gi;
     let match;
-    while ((match = pattern.exec(String(html || "")))) {
-      scripts.push(absolutize(unescapeHtml(match[1]), baseUrl));
-    }
-    return uniq(scripts);
+    while ((match = re.exec(String(html || "")))) urls.push(abs(unescapeHtml(match[1]), baseUrl));
+    return uniq(urls);
   }
 
-  function buildUrlVariants(rawPath, baseUrl, code) {
-    if (!rawPath || /\$\{|\{\{|\+|\[object/i.test(rawPath)) return [];
-    let path = rawPath.replace(/\\u002F/g, "/").replace(/&amp;/g, "&");
-    if (!/^https?:\/\//i.test(path) && !path.startsWith("/")) return [];
-    if (/\.(png|jpe?g|webp|gif|svg|css|map)(\?|$)/i.test(path)) return [];
-    const encoded = encodeURIComponent(code);
-    const base = absolutize(path, baseUrl);
-    const urls = [base];
+  function urlVariants(path, baseUrl, code) {
+    if (!path || /\$\{|\{\{|\+|\[object/i.test(path)) return [];
+    const cleaned = String(path).replace(/\\u002F/g, "/").replace(/&amp;/g, "&");
+    if (!/^https?:\/\//i.test(cleaned) && !cleaned.startsWith("/")) return [];
+    if (/\.(png|jpe?g|webp|gif|svg|css|map)(\?|$)/i.test(cleaned)) return [];
 
+    const out = [];
+    const base = abs(cleaned, baseUrl);
+    out.push(base);
     try {
       const u = new URL(base);
       const hasDeckParam = [...u.searchParams.keys()].some((key) => /deck|code|id/i.test(key));
@@ -238,36 +226,32 @@
         for (const key of ["deck_code", "code", "deck", "id"]) {
           const copy = new URL(u.href);
           copy.searchParams.set(key, code);
-          urls.push(copy.href);
+          out.push(copy.href);
         }
       }
-      if (!u.pathname.endsWith(`/${encoded}`)) urls.push(`${u.origin}${u.pathname.replace(/\/$/, "")}/${encoded}${u.search || ""}`);
+      const encoded = encodeURIComponent(code);
+      if (!u.pathname.endsWith(`/${encoded}`)) out.push(`${u.origin}${u.pathname.replace(/\/$/, "")}/${encoded}${u.search || ""}`);
     } catch {}
-
-    return urls;
+    return out;
   }
 
-  function discoverCandidateUrlsFromText(text, baseUrl, code) {
-    const discovered = [];
-    const source = String(text || "");
-    const quotedPathPattern = /["'`]([^"'`]{1,220}(?:api|deck|Deck|recipe|Recipe|view|View)[^"'`]{0,220})["'`]/g;
+  function discoverUrls(text, baseUrl, code) {
+    const found = [];
+    const re = /["'`]([^"'`]{1,240}(?:api|deck|Deck|recipe|Recipe|view|View)[^"'`]{0,240})["'`]/g;
     let match;
-    while ((match = quotedPathPattern.exec(source))) {
-      discovered.push(...buildUrlVariants(match[1], baseUrl, code));
-    }
-    return uniq(discovered);
+    while ((match = re.exec(String(text || "")))) found.push(...urlVariants(match[1], baseUrl, code));
+    return uniq(found);
   }
 
-  async function discoverFromHtmlOrScript(text, sourceUrl, code, scriptBudget) {
-    const discovered = discoverCandidateUrlsFromText(text, sourceUrl, code);
-    const scriptUrls = extractScriptUrls(text, sourceUrl).slice(0, scriptBudget.count);
-    scriptBudget.count -= scriptUrls.length;
-
-    for (const scriptUrl of scriptUrls) {
+  async function discoverFromPage(text, sourceUrl, code, budget) {
+    const discovered = discoverUrls(text, sourceUrl, code);
+    const scripts = scriptUrls(text, sourceUrl).slice(0, budget.count);
+    budget.count -= scripts.length;
+    for (const scriptUrl of scripts) {
       try {
-        setDeckLogStatus(`Đang dò API DeckLog từ script...`);
-        const scriptText = await fetchTextWithFallback(scriptUrl);
-        discovered.push(...discoverCandidateUrlsFromText(scriptText, scriptUrl, code));
+        setStatus("Đang dò API DeckLog từ script...");
+        const js = await fetchText(scriptUrl);
+        discovered.push(...discoverUrls(js, scriptUrl, code));
       } catch (error) {
         console.warn("Không đọc được script DeckLog", scriptUrl, error);
       }
@@ -276,36 +260,31 @@
   }
 
   function parseJsonLoose(text) {
-    const trimmed = String(text || "").trim();
-    if (!trimmed) return null;
-    try {
-      return JSON.parse(trimmed);
-    } catch {}
+    const raw = String(text || "").trim();
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch {}
 
-    const scriptJsonMatches = [
+    const blocks = [
       /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
       /<script[^>]+id=["']__NUXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
+      /<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i,
     ];
-    for (const pattern of scriptJsonMatches) {
-      const match = trimmed.match(pattern);
+    for (const re of blocks) {
+      const match = raw.match(re);
       if (match?.[1]) {
-        try {
-          return JSON.parse(unescapeHtml(match[1].trim()));
-        } catch {}
+        try { return JSON.parse(unescapeHtml(match[1].trim())); } catch {}
       }
     }
 
-    const assignmentPatterns = [
+    const assignments = [
       /window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
       /window\.__NUXT__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
       /window\.__APOLLO_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
     ];
-    for (const pattern of assignmentPatterns) {
-      const match = trimmed.match(pattern);
+    for (const re of assignments) {
+      const match = raw.match(re);
       if (match?.[1]) {
-        try {
-          return JSON.parse(match[1]);
-        } catch {}
+        try { return JSON.parse(match[1]); } catch {}
       }
     }
     return null;
@@ -317,38 +296,38 @@
     return textarea.value;
   }
 
-  function firstDeepValue(obj, keyNames, depth = 0) {
+  function deepValue(obj, keys, depth = 0) {
     if (!obj || depth > 5) return undefined;
     if (Array.isArray(obj)) {
       for (const item of obj) {
-        const value = firstDeepValue(item, keyNames, depth + 1);
+        const value = deepValue(item, keys, depth + 1);
         if (value !== undefined && value !== null && value !== "") return value;
       }
       return undefined;
     }
     if (typeof obj !== "object") return undefined;
-    const lowerKeys = keyNames.map((k) => k.toLowerCase());
+    const lower = keys.map((key) => key.toLowerCase());
     for (const [key, value] of Object.entries(obj)) {
-      if (lowerKeys.includes(key.toLowerCase()) && value !== undefined && value !== null && value !== "") return value;
+      if (lower.includes(key.toLowerCase()) && value !== undefined && value !== null && value !== "") return value;
     }
     for (const value of Object.values(obj)) {
-      const nested = firstDeepValue(value, keyNames, depth + 1);
+      const nested = deepValue(value, keys, depth + 1);
       if (nested !== undefined && nested !== null && nested !== "") return nested;
     }
     return undefined;
   }
 
-  function firstImageUrl(obj, baseUrl, depth = 0) {
+  function firstImage(obj, baseUrl, depth = 0) {
     if (!obj || depth > 5) return "";
     if (typeof obj === "string") {
       const value = obj.trim();
-      const isImageLike = /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(value) || /card|image|thumb|img/i.test(value);
-      if (isImageLike && (/^https?:\/\//i.test(value) || value.startsWith("/"))) return absolutize(value, baseUrl);
+      const imageLike = /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(value) || /card|image|thumb|img/i.test(value);
+      if (imageLike && (/^https?:\/\//i.test(value) || value.startsWith("/"))) return abs(value, baseUrl);
       return "";
     }
     if (Array.isArray(obj)) {
       for (const item of obj) {
-        const value = firstImageUrl(item, baseUrl, depth + 1);
+        const value = firstImage(item, baseUrl, depth + 1);
         if (value) return value;
       }
       return "";
@@ -356,41 +335,50 @@
     if (typeof obj !== "object") return "";
     for (const [key, value] of Object.entries(obj)) {
       if (/image|img|thumb|picture|card.*url|url/i.test(key)) {
-        const found = firstImageUrl(value, baseUrl, depth + 1);
+        const found = firstImage(value, baseUrl, depth + 1);
         if (found) return found;
       }
     }
     for (const value of Object.values(obj)) {
-      const found = firstImageUrl(value, baseUrl, depth + 1);
+      const found = firstImage(value, baseUrl, depth + 1);
       if (found) return found;
     }
     return "";
   }
 
-  function collectCardEntriesFromJson(root, sourceUrl) {
+  function looksLikeOverviewImage(url) {
+    const value = String(url || "").toLowerCase();
+    if (!value) return false;
+    return /ogp|og-image|twitter|share|sns|deckimage|deck_image|deck-img|deck_img|recipe|thumbnail|capture|screenshot|preview|export|list|full|view/.test(value)
+      && !/\/card(s)?\//.test(value)
+      && !/card_images/.test(value);
+  }
+
+  function collectJsonEntries(root, sourceUrl) {
     const entries = [];
-    const seenObjects = new WeakSet();
+    const seen = new WeakSet();
     const qtyKeys = ["qty", "quantity", "count", "num", "number", "枚数", "card_num", "cardNum", "amount"];
     const idKeys = ["card_number", "cardNumber", "card_no", "cardNo", "card_id", "cardId", "card_code", "cardCode", "code", "id", "number"];
     const nameKeys = ["name", "card_name", "cardName", "title", "card_title", "cardTitle"];
 
     function visit(node, depth = 0) {
-      if (!node || depth > 12) return;
-      if (typeof node !== "object") return;
-      if (seenObjects.has(node)) return;
-      seenObjects.add(node);
+      if (!node || depth > 12 || typeof node !== "object") return;
+      if (seen.has(node)) return;
+      seen.add(node);
 
       if (!Array.isArray(node)) {
-        const qtyRaw = firstDeepValue(node, qtyKeys, 0);
-        const codeRaw = firstDeepValue(node, idKeys, 0);
-        const nameRaw = firstDeepValue(node, nameKeys, 0);
-        const imageUrl = firstImageUrl(node, sourceUrl, 0);
-        const qty = normalizeQty(qtyRaw || 1);
+        const keys = Object.keys(node).join(" ");
+        const qtyRaw = deepValue(node, qtyKeys, 0);
+        const codeRaw = deepValue(node, idKeys, 0);
+        const nameRaw = deepValue(node, nameKeys, 0);
+        const image = firstImage(node, sourceUrl, 0);
         const code = codeRaw === undefined || codeRaw === null ? "" : String(codeRaw).trim();
         const name = nameRaw === undefined || nameRaw === null ? code : String(nameRaw).trim();
-        const hasCardSignal = imageUrl || /[A-Z0-9_-]+[\/.-][A-Z0-9_-]+/i.test(code) || /card/i.test(Object.keys(node).join(" "));
-        const hasQtySignal = qtyRaw !== undefined || Object.keys(node).some((key) => qtyKeys.includes(key));
-        if (hasCardSignal && (hasQtySignal || imageUrl)) entries.push({ code, name, qty, src: imageUrl, sourceUrl });
+        const hasQty = qtyRaw !== undefined || Object.keys(node).some((key) => qtyKeys.includes(key));
+        const hasCardSignal = /card/i.test(keys) || /[A-Z0-9_-]+[\/.-][A-Z0-9_-]+/i.test(code) || image;
+        if (hasCardSignal && hasQty && !looksLikeOverviewImage(image)) {
+          entries.push({ code, name, qty: qty(qtyRaw || 1), src: image, sourceUrl });
+        }
       }
 
       const children = Array.isArray(node) ? node : Object.values(node);
@@ -401,116 +389,138 @@
     return normalizeEntries(entries);
   }
 
-  function parseDeckTextLines(text) {
+  function parseDeckText(text) {
     const entries = [];
-    const lines = String(text || "").split(/\r?\n/);
-    for (const lineRaw of lines) {
+    for (const lineRaw of String(text || "").split(/\r?\n/)) {
       const line = lineRaw.trim();
       if (!line || line.startsWith("#") || line.startsWith("!")) continue;
       let match = line.match(/^([0-9]{1,3})\s*[x×*]?\s+(.+)$/i);
       if (match) {
-        entries.push({ qty: normalizeQty(match[1]), code: match[2].trim(), name: match[2].trim(), src: "" });
+        entries.push({ qty: qty(match[1]), code: match[2].trim(), name: match[2].trim(), src: "" });
         continue;
       }
       match = line.match(/^(.+?)\s+[x×*]?\s*([0-9]{1,3})$/i);
-      if (match && /[A-Z0-9]/i.test(match[1])) entries.push({ qty: normalizeQty(match[2]), code: match[1].trim(), name: match[1].trim(), src: "" });
+      if (match && /[A-Z0-9]/i.test(match[1])) entries.push({ qty: qty(match[2]), code: match[1].trim(), name: match[1].trim(), src: "" });
     }
     return normalizeEntries(entries);
   }
 
-  function parseImageLinksFromFetchedText(text) {
-    const entries = [];
-    const urls = extractUrls(text).filter((url) => /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(url) && !/logo|icon|favicon|sprite/i.test(url));
-    for (const url of urls) {
-      entries.push({
-        qty: 1,
-        code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-        name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
-        src: url,
-        sourceUrl: url,
-      });
-    }
-    return normalizeEntries(entries);
+  function parseCardImageLinks(text) {
+    const urls = urlsFrom(text)
+      .filter((url) => /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(url))
+      .filter((url) => !/logo|icon|favicon|sprite|banner/i.test(url))
+      .filter((url) => !looksLikeOverviewImage(url))
+      .filter((url) => /\/card(s)?\/|card_images|\/assets\/.*card|card.*image/i.test(url));
+
+    if (uniq(urls).length < MIN_IMAGE_URLS_FOR_DECK) return [];
+    return normalizeEntries(uniq(urls).map((url) => ({
+      qty: 1,
+      code: safeFileName(url.split("/").pop()?.split("?")[0] || "card"),
+      name: safeFileName(url.split("/").pop()?.split("?")[0] || "card"),
+      src: url,
+      sourceUrl: url,
+    })));
   }
 
   function normalizeEntries(entries) {
     const map = new Map();
-    for (const entry of entries) {
+    for (const entry of entries || []) {
       const code = String(entry.code || "").trim();
       const src = String(entry.src || "").trim();
       const name = String(entry.name || code || src || "DeckLog card").trim();
       if (!code && !src && !name) continue;
       const key = src || code || name;
       const current = map.get(key);
-      const qty = normalizeQty(entry.qty);
+      const amount = qty(entry.qty);
       if (current) {
-        current.qty += qty;
+        current.qty += amount;
         if (!current.src && src) current.src = src;
-        if (!current.name && name) current.name = name;
+        if (!current.code && code) current.code = code;
       } else {
-        map.set(key, { code, name, qty, src, sourceUrl: entry.sourceUrl || "" });
+        map.set(key, { code, name, qty: amount, src, sourceUrl: entry.sourceUrl || "" });
       }
     }
     return [...map.values()].filter((entry) => entry.qty > 0);
   }
 
-  function buildImageCandidates(entry) {
-    const candidates = [];
-    if (entry.src) candidates.push(entry.src);
+  function isUsableDeck(entries) {
+    const list = normalizeEntries(entries);
+    const total = list.reduce((sum, entry) => sum + qty(entry.qty), 0);
+    const hasRealCardCode = list.some((entry) => entry.code && !/^https?:\/\//i.test(entry.code) && !/\.(png|jpe?g|webp|gif|avif)$/i.test(entry.code));
+    const allOverview = list.length > 0 && list.every((entry) => looksLikeOverviewImage(entry.src));
+    return list.length >= 2 && total >= 2 && !allOverview && (hasRealCardCode || list.length >= MIN_IMAGE_URLS_FOR_DECK);
+  }
+
+  function imageCandidates(entry) {
+    const out = [];
+    if (entry.src && !looksLikeOverviewImage(entry.src)) out.push(entry.src);
     const code = String(entry.code || "").trim();
     if (code && !/^https?:\/\//i.test(code)) {
-      const encodedPath = code.split("/").map(encodeURIComponent).join("/");
-      const encodedFile = encodeURIComponent(code);
+      const path = code.split("/").map(encodeURIComponent).join("/");
+      const file = encodeURIComponent(code);
       for (const domain of DECKLOG_DOMAINS) {
-        candidates.push(`${domain}/images/card/${encodedPath}.png`);
-        candidates.push(`${domain}/images/cards/${encodedPath}.png`);
-        candidates.push(`${domain}/assets/images/card/${encodedPath}.png`);
-        candidates.push(`${domain}/assets/image/card/${encodedPath}.png`);
-        candidates.push(`${domain}/assets/img/card/${encodedPath}.png`);
-        candidates.push(`${domain}/card_images/${encodedFile}.png`);
-        candidates.push(`${domain}/card/${encodedFile}.png`);
+        out.push(`${domain}/images/card/${path}.png`);
+        out.push(`${domain}/images/cards/${path}.png`);
+        out.push(`${domain}/assets/images/card/${path}.png`);
+        out.push(`${domain}/assets/image/card/${path}.png`);
+        out.push(`${domain}/assets/img/card/${path}.png`);
+        out.push(`${domain}/card_images/${file}.png`);
+        out.push(`${domain}/card/${file}.png`);
       }
     }
-    return uniq(candidates);
+    return uniq(out);
+  }
+
+  function attachCandidates(entries) {
+    return normalizeEntries(entries).map((entry) => {
+      const candidates = imageCandidates(entry);
+      return { ...entry, imageCandidates: candidates, src: entry.src || candidates[0] || "" };
+    });
   }
 
   async function resolveDeckLog(input) {
     const raw = String(input || "").trim();
     if (!raw) throw new Error("Bạn chưa nhập DeckLog code/link.");
-    if (hasDirectImageInput(raw)) {
-      throw new Error("Ô này chỉ nhập DeckLog. Link ảnh hãy dán/kéo vào vùng nhập ảnh phía trên hoặc thả vào toàn trang.");
-    }
+    if (hasDirectImageInput(raw)) throw new Error("Ô này chỉ nhập DeckLog. Link ảnh hãy dán/kéo vào vùng nhập ảnh phía trên hoặc thả vào toàn trang.");
 
-    const pasted = parseDeckTextLines(raw);
-    if (pasted.length > 1) return withImageCandidates(pasted);
+    const pasted = parseDeckText(raw);
+    if (isUsableDeck(pasted)) return attachCandidates(pasted);
 
-    const code = extractDeckLogCode(raw);
+    const code = extractDeckCode(raw);
     if (!code) throw new Error("Không nhận diện được DeckLog code/link.");
 
-    const queue = buildDeckLogCandidateUrls(raw);
+    const queue = candidateDeckUrls(raw);
     const seen = new Set();
+    const scriptBudget = { count: MAX_SCRIPTS };
     const errors = [];
-    const scriptBudget = { count: MAX_SCRIPT_DISCOVERY };
-    let fetchCount = 0;
+    let sawOverviewOnly = false;
+    let count = 0;
 
-    while (queue.length && fetchCount < MAX_DECKLOG_FETCHES) {
+    while (queue.length && count < MAX_FETCHES) {
       const url = queue.shift();
       if (!url || seen.has(url)) continue;
       seen.add(url);
-      fetchCount += 1;
+      count += 1;
 
       try {
-        setDeckLogStatus(`Đang đọc DeckLog ${code} (${fetchCount}/${Math.min(MAX_DECKLOG_FETCHES, fetchCount + queue.length)})...`);
-        const text = await fetchTextWithFallback(url);
+        setStatus(`Đang đọc DeckLog ${code} (${count}/${Math.min(MAX_FETCHES, count + queue.length)})...`);
+        const text = await fetchText(url);
         const json = parseJsonLoose(text);
-        let entries = json ? collectCardEntriesFromJson(json, url) : [];
-        if (!entries.length) entries = parseImageLinksFromFetchedText(text);
-        if (!entries.length) entries = parseDeckTextLines(text);
-        if (entries.length) return withImageCandidates(entries);
 
-        const discovered = await discoverFromHtmlOrScript(text, url, code, scriptBudget);
-        for (const candidate of discovered) {
-          if (!seen.has(candidate) && queue.length < MAX_DECKLOG_FETCHES) queue.push(candidate);
+        const candidates = [];
+        if (json) candidates.push(collectJsonEntries(json, url));
+        candidates.push(parseDeckText(text));
+        candidates.push(parseCardImageLinks(text));
+
+        for (const entries of candidates) {
+          if (!entries.length) continue;
+          if (entries.length === 1 && looksLikeOverviewImage(entries[0].src)) sawOverviewOnly = true;
+          if (isUsableDeck(entries)) return attachCandidates(entries);
+        }
+
+        const discovered = await discoverFromPage(text, url, code, scriptBudget);
+        for (const next of discovered) {
+          if (!seen.has(next) && queue.length < MAX_FETCHES) queue.push(next);
         }
       } catch (error) {
         errors.push(`${url}: ${error.message}`);
@@ -518,108 +528,100 @@
     }
 
     console.warn("DeckLog resolve errors", errors);
-    throw new Error(`Không đọc được DeckLog (${code}). Trang DeckLog có thể không mở dữ liệu deck qua request thường; hãy thử link share /view đầy đủ hoặc text export của DeckLog.`);
+    if (sawOverviewOnly) throw new Error(`DeckLog (${code}) chỉ trả ảnh tổng hợp deck, chưa lấy được từng ảnh card. Cần link/API chứa danh sách card hoặc text export DeckLog để tạo file in đúng số lượng.`);
+    throw new Error(`Không đọc được danh sách card từ DeckLog (${code}). Hãy thử link share /view đầy đủ hoặc text export của DeckLog.`);
   }
 
-  function withImageCandidates(entries) {
-    return entries.map((entry) => {
-      const imageCandidates = buildImageCandidates(entry);
-      return { ...entry, imageCandidates, src: entry.src || imageCandidates[0] || "" };
-    });
-  }
-
-  async function importDeckLogFromInput(input) {
+  async function importDeckLog(input) {
     if (!requirePrinterApi()) return;
     try {
-      setDeckLogStatus("Đang đọc DeckLog...");
+      setStatus("Đang đọc DeckLog...");
       const entries = await resolveDeckLog(input);
       if (!entries.length) throw new Error("DeckLog không có card hợp lệ.");
       if (typeof snapshot === "function") snapshot();
 
-      const importedCards = entries.map((entry) => ({
+      const imported = entries.map((entry) => ({
         name: entry.name || entry.code || "DeckLog card",
         src: entry.src,
-        qty: normalizeQty(entry.qty),
+        qty: qty(entry.qty),
         external: true,
         cardId: entry.code || undefined,
         decklog: true,
         imageCandidates: entry.imageCandidates,
       }));
 
-      cards.push(...importedCards);
+      cards.push(...imported);
       renderList();
       if (typeof drawLayoutPreview === "function") drawLayoutPreview();
       updateCounters();
 
-      lastDeckLogEntries = entries;
-      lastDeckLogName = extractDeckLogCode(input) || "decklog";
-      const total = entries.reduce((sum, entry) => sum + normalizeQty(entry.qty), 0);
-      setDeckLogStatus(`Đã nhập ${entries.length} loại card / ${total} bản in. Có thể bấm Xuất PDF/DOCX để tạo file in.`);
+      lastEntries = entries;
+      lastDeckName = extractDeckCode(input) || "decklog";
+      const total = entries.reduce((sum, entry) => sum + qty(entry.qty), 0);
+      setStatus(`Đã nhập ${entries.length} loại card / ${total} bản in. Bấm Xuất PDF/DOCX để tạo file in.`);
     } catch (error) {
       console.error(error);
-      setDeckLogStatus(error.message || "Nhập DeckLog thất bại.", true);
+      setStatus(error.message || "Nhập DeckLog thất bại.", true);
     }
   }
 
-  async function downloadDeckLogZipFromInput(input) {
+  async function downloadDeckZip(input) {
     try {
-      let entries = lastDeckLogEntries;
-      const code = extractDeckLogCode(input);
-      if (!entries.length || (code && code !== lastDeckLogName)) {
-        setDeckLogStatus("Đang đọc DeckLog để tải ZIP...");
+      let entries = lastEntries;
+      const code = extractDeckCode(input);
+      if (!entries.length || (code && code !== lastDeckName)) {
+        setStatus("Đang đọc DeckLog để tải ZIP...");
         entries = await resolveDeckLog(input);
-        lastDeckLogEntries = entries;
-        lastDeckLogName = code || "decklog";
+        lastEntries = entries;
+        lastDeckName = code || "decklog";
       }
       if (!entries.length) throw new Error("Không có card DeckLog để tải ZIP.");
-      await downloadImagesAsZip(entries, lastDeckLogName);
+      await downloadImagesAsZip(entries, lastDeckName);
     } catch (error) {
       console.error(error);
-      setDeckLogStatus(error.message || "Tải ZIP thất bại.", true);
+      setStatus(error.message || "Tải ZIP thất bại.", true);
     }
   }
 
   async function downloadImagesAsZip(entries, deckName) {
     const expanded = [];
     for (const entry of entries) {
-      const qty = normalizeQty(entry.qty);
-      for (let i = 0; i < qty; i++) expanded.push(entry);
+      for (let i = 0; i < qty(entry.qty); i++) expanded.push(entry);
     }
     const files = [];
     for (let index = 0; index < expanded.length; index++) {
       const entry = expanded[index];
-      setDeckLogStatus(`Đang tải ảnh ${index + 1}/${expanded.length}...`);
-      const blob = await fetchFirstWorkingBlob(entry.imageCandidates || [entry.src]);
-      const buffer = new Uint8Array(await blob.arrayBuffer());
-      const ext = extensionFromBlobOrUrl(blob, entry.src);
+      setStatus(`Đang tải ảnh ${index + 1}/${expanded.length}...`);
+      const blob = await fetchFirstBlob(entry.imageCandidates || [entry.src]);
+      const data = new Uint8Array(await blob.arrayBuffer());
+      const ext = extFrom(blob, entry.src);
       const base = safeFileName(entry.code || entry.name || `card-${index + 1}`);
-      files.push({ name: `${pad(index + 1)}_${base}${ext}`, data: buffer });
+      files.push({ name: `${pad(index + 1)}_${base}${ext}`, data });
     }
-    const zipBlob = makeZipBlob(files);
+    const zip = makeZipBlob(files);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(zipBlob);
+    a.href = URL.createObjectURL(zip);
     a.download = `${safeFileName(deckName || "decklog")}_images.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
-    setDeckLogStatus(`Đã tạo ZIP gồm ${files.length} file ảnh.`);
+    setStatus(`Đã tạo ZIP gồm ${files.length} file ảnh.`);
   }
 
-  async function fetchFirstWorkingBlob(candidates) {
-    const urls = uniq(candidates || []);
+  async function fetchFirstBlob(candidates) {
     let lastError = null;
-    for (const url of urls) {
-      if (!url) continue;
+    for (const url of uniq(candidates || [])) {
+      if (!url || looksLikeOverviewImage(url)) continue;
       try {
-        const blob = await fetchBlobWithDeckLogFallback(url);
+        const blob = await fetchBlob(url);
         if (blob && blob.size > 0) return blob;
       } catch (error) {
         lastError = error;
       }
     }
-    throw lastError || new Error("Không tìm thấy URL ảnh hợp lệ cho card.");
+    throw lastError || new Error("Không tìm thấy URL ảnh card hợp lệ.");
   }
 
-  function extensionFromBlobOrUrl(blob, url) {
+  function extFrom(blob, url) {
     const type = String(blob?.type || "").toLowerCase();
     if (type.includes("png")) return ".png";
     if (type.includes("webp")) return ".webp";
@@ -630,50 +632,28 @@
   }
 
   function makeZipBlob(files) {
-    const localParts = [];
-    const centralParts = [];
+    const locals = [];
+    const centrals = [];
     let offset = 0;
     for (const file of files) {
-      const nameBytes = utf8(file.name);
+      const name = utf8(file.name);
       const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
       const crc = crc32(data);
-      const localHeader = concatBytes(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes);
-      localParts.push(localHeader, data);
-      const centralHeader = concatBytes(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes);
-      centralParts.push(centralHeader);
-      offset += localHeader.length + data.length;
+      const local = bytes(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), name);
+      locals.push(local, data);
+      const central = bytes(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name);
+      centrals.push(central);
+      offset += local.length + data.length;
     }
-    const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-    const endRecord = concatBytes(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(centralSize), u32(offset), u16(0));
-    return new Blob([...localParts, ...centralParts, endRecord], { type: "application/zip" });
+    const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+    const end = bytes(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(centralSize), u32(offset), u16(0));
+    return new Blob([...locals, ...centrals, end], { type: "application/zip" });
   }
 
-  function utf8(value) {
-    return new TextEncoder().encode(String(value));
-  }
-
-  function u16(value) {
-    const out = new Uint8Array(2);
-    new DataView(out.buffer).setUint16(0, value & 0xffff, true);
-    return out;
-  }
-
-  function u32(value) {
-    const out = new Uint8Array(4);
-    new DataView(out.buffer).setUint32(0, value >>> 0, true);
-    return out;
-  }
-
-  function concatBytes(...parts) {
-    const total = parts.reduce((sum, part) => sum + part.length, 0);
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const part of parts) {
-      out.set(part, offset);
-      offset += part.length;
-    }
-    return out;
-  }
+  function utf8(value) { return new TextEncoder().encode(String(value)); }
+  function u16(value) { const out = new Uint8Array(2); new DataView(out.buffer).setUint16(0, value & 0xffff, true); return out; }
+  function u32(value) { const out = new Uint8Array(4); new DataView(out.buffer).setUint32(0, value >>> 0, true); return out; }
+  function bytes(...parts) { const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0)); let pos = 0; for (const part of parts) { out.set(part, pos); pos += part.length; } return out; }
 
   let crcTable = null;
   function crc32(data) {
