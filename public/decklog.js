@@ -354,6 +354,82 @@
       && !/card_images/.test(value);
   }
 
+  function extractImgSrc(img, baseUrl) {
+    const raw = img.getAttribute("data-original") || img.getAttribute("data-src") || img.getAttribute("data-lazy") || img.getAttribute("src") || "";
+    return abs(unescapeHtml(raw), baseUrl);
+  }
+
+  function looksLikeCardImageUrl(url) {
+    const value = String(url || "").toLowerCase();
+    if (!value || looksLikeOverviewImage(value)) return false;
+    if (/logo|icon|favicon|sprite|banner|avatar|facebook|twitter|x-twitter/.test(value)) return false;
+    return /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(value)
+      && (/\/card(s)?\/|card_images|\/assets\/.*card|card.*image|\/images\//i.test(value));
+  }
+
+  function closestSingleImageContainer(img) {
+    let node = img;
+    for (let depth = 0; depth < 6 && node; depth += 1) {
+      if (node.querySelectorAll && node.querySelectorAll("img").length === 1) {
+        const text = (node.textContent || "").trim();
+        if (text.length <= 160) return node;
+      }
+      node = node.parentElement;
+    }
+    return img.parentElement || img;
+  }
+
+  function readQtyNearImage(img) {
+    const selectors = [
+      "[class*='num']",
+      "[class*='count']",
+      "[class*='qty']",
+      "[class*='quantity']",
+      "[data-num]",
+      "[data-count]",
+      "[data-qty]",
+      "[data-quantity]",
+    ];
+    let node = img;
+    for (let depth = 0; depth < 6 && node; depth += 1) {
+      for (const selector of selectors) {
+        const found = node.querySelector?.(selector);
+        const value = found?.dataset?.num || found?.dataset?.count || found?.dataset?.qty || found?.dataset?.quantity || found?.textContent;
+        const match = String(value || "").trim().match(/^([1-4])$/);
+        if (match) return Number(match[1]);
+      }
+
+      const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+      if (text.length <= 80) {
+        const matches = [...text.matchAll(/(?:^|\s)([1-4])(?:\s|$)/g)].map((match) => Number(match[1]));
+        if (matches.length) return matches[matches.length - 1];
+      }
+      node = node.parentElement;
+    }
+    return 1;
+  }
+
+  function parseRenderedDeckLogHtml(text, baseUrl) {
+    if (typeof DOMParser === "undefined") return [];
+    const doc = new DOMParser().parseFromString(String(text || ""), "text/html");
+    const entries = [];
+    for (const img of doc.querySelectorAll("img")) {
+      const src = extractImgSrc(img, baseUrl);
+      if (!looksLikeCardImageUrl(src)) continue;
+      const holder = closestSingleImageContainer(img);
+      const amount = readQtyNearImage(holder || img);
+      const code = img.getAttribute("alt") || img.getAttribute("title") || src.split("/").pop()?.split("?")[0] || "DeckLog card";
+      entries.push({
+        qty: amount,
+        code: safeFileName(code),
+        name: safeFileName(code),
+        src,
+        sourceUrl: baseUrl,
+      });
+    }
+    return normalizeEntries(entries);
+  }
+
   function collectJsonEntries(root, sourceUrl) {
     const entries = [];
     const seen = new WeakSet();
@@ -407,10 +483,7 @@
 
   function parseCardImageLinks(text) {
     const urls = urlsFrom(text)
-      .filter((url) => /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(url))
-      .filter((url) => !/logo|icon|favicon|sprite|banner/i.test(url))
-      .filter((url) => !looksLikeOverviewImage(url))
-      .filter((url) => /\/card(s)?\/|card_images|\/assets\/.*card|card.*image/i.test(url));
+      .filter((url) => looksLikeCardImageUrl(url));
 
     if (uniq(urls).length < MIN_IMAGE_URLS_FOR_DECK) return [];
     return normalizeEntries(uniq(urls).map((url) => ({
@@ -509,6 +582,7 @@
 
         const candidates = [];
         if (json) candidates.push(collectJsonEntries(json, url));
+        candidates.push(parseRenderedDeckLogHtml(text, url));
         candidates.push(parseDeckText(text));
         candidates.push(parseCardImageLinks(text));
 
