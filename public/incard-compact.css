@@ -1,0 +1,58 @@
+/* Compact workspace override: remove visible layout preview, maximize import/list area. */
+.container {
+  width: min(100% - 2rem, 1180px);
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.container > * {
+  grid-column: 1 / -1 !important;
+}
+
+.layout-preview-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+}
+
+.uploader {
+  min-height: 120px;
+}
+
+#decklogPanel {
+  padding: 1rem;
+}
+
+.decklog-import-row {
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+}
+
+.controls {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.actions {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.action-group {
+  min-height: 82px;
+}
+
+.preview-list {
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+}
+
+@media (max-width: 760px) {
+  .container {
+    width: min(100% - 1.2rem, 720px);
+  }
+
+  .decklog-import-row,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
