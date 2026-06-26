@@ -26,7 +26,6 @@
       const deckManager = document.getElementById("deckManager");
       const imageViewer = document.getElementById("imageViewer");
       const pageDropOverlay = document.getElementById("pageDropOverlay");
-      const decklogPanel = document.getElementById("decklogPanel");
       const dropzone = document.getElementById("dropzone");
 
       let lastCardCount = cardList?.children.length || 0;
@@ -40,8 +39,10 @@
           "#decklogPanel",
           "#backSection:not([style*='display:none'])",
           ".controls",
-          ".container > section:not(.uploader):not(.controls):not(.preview-panel)",
-          ".preview-panel",
+          ".actions",
+          ".stats",
+          ".preview-section",
+          ".empty-state",
         ].join(", ");
 
         gsap.set(introTargets, { willChange: "transform, opacity" });
@@ -49,8 +50,8 @@
           .timeline({ defaults: { duration: 0.5, ease: "power3.out" } })
           .from(".topbar", { autoAlpha: 0, y: -14 })
           .from(
-            "#dropzone, #decklogPanel, #backSection:not([style*='display:none']), .controls, .container > section:not(.uploader):not(.controls):not(.preview-panel), .preview-panel",
-            { autoAlpha: 0, y: 18, scale: 0.985, stagger: 0.06, clearProps: "transform,opacity,visibility,willChange" },
+            "#dropzone, #decklogPanel, #backSection:not([style*='display:none']), .controls, .actions, .stats, .preview-section, .empty-state",
+            { autoAlpha: 0, y: 18, scale: 0.985, stagger: 0.055, clearProps: "transform,opacity,visibility,willChange" },
             "<0.08"
           );
       };
@@ -110,8 +111,8 @@
       };
 
       [
-        [deckManager, ".deck-modal-content"],
-        [imageViewer, ".image-viewer-content"],
+        [deckManager, ".modal-content"],
+        [imageViewer, ".viewer-content, .modal-content"],
       ].forEach(([modal, contentSelector]) => {
         if (!modal) return;
         const observer = new MutationObserver(() => animateVisibleModal(modal, contentSelector));
@@ -122,7 +123,7 @@
       if (pageDropOverlay) {
         const overlayObserver = new MutationObserver(() => {
           if (pageDropOverlay.classList.contains("show")) {
-            const box = pageDropOverlay.querySelector(".page-drop-box");
+            const box = pageDropOverlay.querySelector(".overlay-content, .page-drop-box");
             gsap.fromTo(pageDropOverlay, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.18 });
             if (box) pulse(box, { fromScale: 0.94, duration: 0.36 });
           }
@@ -145,12 +146,12 @@
 
       const bindPressFeedback = () => {
         const onPointerDown = (event) => {
-          const button = event.target.closest?.(".btn, .qty-btn, .deck-actions button");
+          const button = event.target.closest?.(".btn, .qty-btn, .deck-actions button, .close-viewer");
           if (!button || button.disabled) return;
           gsap.to(button, { scale: 0.97, duration: 0.08, ease: "power2.out" });
         };
         const onPointerUp = (event) => {
-          const button = event.target.closest?.(".btn, .qty-btn, .deck-actions button");
+          const button = event.target.closest?.(".btn, .qty-btn, .deck-actions button, .close-viewer");
           if (!button || button.disabled) return;
           gsap.to(button, { scale: 1, duration: 0.16, ease: "back.out(2)", clearProps: "transform" });
         };
@@ -168,7 +169,7 @@
         const buttons = ["decklogImportBtn", "decklogZipBtn"]
           .map((id) => document.getElementById(id))
           .filter(Boolean);
-        const onClick = () => pulse(decklogPanel || document.getElementById("decklogPanel"));
+        const onClick = () => pulse(document.getElementById("decklogPanel"));
         buttons.forEach((button) => button.addEventListener("click", onClick));
         cleanups.push(() => buttons.forEach((button) => button.removeEventListener("click", onClick)));
       };
