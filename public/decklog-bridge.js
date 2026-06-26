@@ -120,9 +120,167 @@
     }
   }
 
+  function deckLogBookmarkletRunner(endpoint) {
+    (async () => {
+      const absolutize = (url, base = location.href) => {
+        try { return new URL(url, base).href; } catch { return url; }
+      };
+      const cleanName = (value) => String(value || "DeckLog card")
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 100) || "DeckLog card";
+      const normalizeQty = (value) => {
+        const n = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+        return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 1;
+      };
+      const firstCssUrl = (value) => {
+        const match = String(value || "").match(/url\((['"]?)(.*?)\1\)/i);
+        return match?.[2] || "";
+      };
+      const srcFromImg = (img) => {
+        const srcset = img.getAttribute("srcset") || img.dataset.srcset || "";
+        const srcsetCandidate = srcset.split(",").map((part) => part.trim().split(/\s+/)[0]).filter(Boolean).pop();
+        return absolutize(
+          img.dataset.original ||
+          img.dataset.src ||
+          img.dataset.lazy ||
+          img.dataset.url ||
+          img.currentSrc ||
+          img.src ||
+          srcsetCandidate ||
+          ""
+        );
+      };
+      const sourceFromElement = (element) => {
+        if (element.tagName === "IMG") return srcFromImg(element);
+        const style = getComputedStyle(element);
+        const background = firstCssUrl(style.backgroundImage) || firstCssUrl(element.getAttribute("style"));
+        return absolutize(background || "");
+      };
+      const isNoiseUrl = (url) => {
+        const value = String(url || "").toLowerCase();
+        if (!value) return true;
+        if (/logo|icon|favicon|sprite|banner|avatar|facebook|twitter|sns|ogp|og-image|share|thumbnail|capture|screenshot|preview|export/.test(value)) {
+          return !/\/card(s)?\//.test(value) && !/card_images/.test(value);
+        }
+        return false;
+      };
+      const isVisibleCardShape = (element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const width = element.naturalWidth || rect.width;
+        const height = element.naturalHeight || rect.height;
+        const ratio = height / (width || 1);
+        return rect.width >= 45 && rect.height >= 60 && width >= 45 && height >= 60 && ratio >= 1.05 && ratio <= 2.25 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0;
+      };
+      const isCardSource = (url, element) => {
+        if (!/^https?:/i.test(url) || isNoiseUrl(url)) return false;
+        return isVisibleCardShape(element) || /\/card(s)?\/|card_images|card.*image|\/images\//i.test(url);
+      };
+      const closestCardBox = (element) => {
+        let node = element;
+        for (let depth = 0; depth < 8 && node; depth += 1) {
+          if (node.querySelectorAll) {
+            const imageLikeCount = [...node.querySelectorAll("img")].filter((img) => isVisibleCardShape(img)).length;
+            const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+            if (imageLikeCount <= 3 && text.length <= 280) return node;
+          }
+          node = node.parentElement;
+        }
+        return element.parentElement || element;
+      };
+      const readQty = (element) => {
+        const selectors = [
+          "[class*=num]",
+          "[class*=count]",
+          "[class*=qty]",
+          "[class*=quantity]",
+          "[class*=deck_num]",
+          "[data-num]",
+          "[data-count]",
+          "[data-qty]",
+          "[data-quantity]",
+        ];
+        let node = element;
+        for (let depth = 0; depth < 8 && node; depth += 1) {
+          for (const selector of selectors) {
+            for (const found of node.querySelectorAll?.(selector) || []) {
+              const value = found.dataset?.num || found.dataset?.count || found.dataset?.qty || found.dataset?.quantity || found.textContent;
+              const match = String(value || "").trim().match(/^([1-9][0-9]?)$/);
+              if (match) return Number(match[1]);
+            }
+          }
+          const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+          if (text.length <= 190) {
+            const values = [...text.matchAll(/(?:^|\s)([1-9][0-9]?)(?:\s|$)/g)]
+              .map((match) => Number(match[1]))
+              .filter((value) => value >= 1 && value <= 50);
+            if (values.length) return values[values.length - 1];
+          }
+          node = node.parentElement;
+        }
+        return 1;
+      };
+
+      const map = new Map();
+      const debugUrls = [];
+      const addCandidate = (element) => {
+        const src = sourceFromElement(element);
+        if (src) debugUrls.push(src);
+        if (!isCardSource(src, element)) return;
+        const holder = closestCardBox(element);
+        const rawName = element.getAttribute?.("alt") || element.getAttribute?.("title") || src.split("/").pop()?.split("?")[0] || "DeckLog card";
+        const name = cleanName(rawName);
+        const current = map.get(src) || { src, name, code: name, qty: 0 };
+        current.qty += readQty(holder);
+        map.set(src, current);
+      };
+
+      document.querySelectorAll("img").forEach(addCandidate);
+      document.querySelectorAll("*").forEach((element) => {
+        const style = getComputedStyle(element);
+        if (style.backgroundImage && style.backgroundImage !== "none") addCandidate(element);
+      });
+
+      const payload = {
+        source: location.href,
+        deckCode: location.pathname.split("/").filter(Boolean).pop() || "decklog",
+        entries: [...map.values()],
+      };
+
+      if (!payload.entries.length) {
+        const debug = {
+          imgCount: document.images.length,
+          backgroundCount: [...document.querySelectorAll("*")].filter((element) => getComputedStyle(element).backgroundImage !== "none").length,
+          sampleUrls: debugUrls.filter(Boolean).slice(0, 30),
+        };
+        try { await navigator.clipboard.writeText(JSON.stringify(debug, null, 2)); } catch {}
+        alert("Không tìm thấy ảnh card. Đã copy debug gồm img/background URL mẫu nếu trình duyệt cho phép. Hãy gửi debug đó cho ChatGPT.");
+        return;
+      }
+
+      try {
+        await fetch(endpoint, {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        alert(`Đã gửi ${payload.entries.length} loại card về InCard. Quay lại InCard và bấm Nhận deck đã gửi.`);
+      } catch (error) {
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(payload));
+          alert("Không gửi được localhost, đã copy JSON. Quay lại InCard và dán vào ô JSON helper.");
+        } catch {
+          prompt("Copy JSON này rồi dán vào InCard:", JSON.stringify(payload));
+        }
+      }
+    })();
+  }
+
   function makeBookmarkletSource() {
-    const source = `(async()=>{const E='${BRIDGE_ENDPOINT}';const A=(u,b=location.href)=>{try{return new URL(u,b).href}catch{return u}};const N=s=>String(s||'DeckLog card').replace(/[\\/:*?"<>|]+/g,'_').replace(/\\s+/g,' ').trim().slice(0,100)||'DeckLog card';const Q=v=>{const n=Number(String(v??'').replace(/[^0-9.-]/g,''));return Number.isFinite(n)?Math.max(1,Math.floor(n)):1};const U=img=>{const ss=img.getAttribute('srcset')||img.dataset.srcset||'';const ssc=ss.split(',').map(x=>x.trim().split(/\\s+/)[0]).filter(Boolean).pop();return A(img.dataset.original||img.dataset.src||img.dataset.lazy||img.dataset.url||img.currentSrc||img.src||ssc||'')};const O=u=>/ogp|og-image|twitter|share|sns|deckimage|deck_image|deck-img|deck_img|recipe|thumbnail|capture|screenshot|preview|export|list|full|view|logo|icon|favicon|sprite|banner|avatar|facebook|twitter/i.test(String(u||''))&&!/\\/card(s)?\\//i.test(String(u||''))&&!/card_images/i.test(String(u||''));const D=img=>{const r=img.getBoundingClientRect();const w=img.naturalWidth||r.width;const h=img.naturalHeight||r.height;const visible=r.width>40&&r.height>55&&getComputedStyle(img).display!=='none'&&getComputedStyle(img).visibility!=='hidden';const ratio=h/(w||1);return visible&&w>=45&&h>=65&&ratio>=1.15&&ratio<=2.1};const C=(u,img)=>/^https?:/i.test(u)&&!O(u)&&(D(img)||/\\.(png|jpe?g|webp|gif|avif)(\\?|#|$)/i.test(u)||/\\/card(s)?\\/|card_images|card.*image|\\/images\\//i.test(u));const H=img=>{let n=img;for(let d=0;d<8&&n;d++){if(n.querySelectorAll){const imgs=n.querySelectorAll('img').length;const t=(n.textContent||'').replace(/\\s+/g,' ').trim();if(imgs<=3&&t.length<=260)return n}n=n.parentElement}return img.parentElement||img};const R=node=>{const sels=['[class*=num]','[class*=count]','[class*=qty]','[class*=quantity]','[class*=deck_num]','[data-num]','[data-count]','[data-qty]','[data-quantity]'];let n=node;for(let d=0;d<8&&n;d++){for(const sel of sels){for(const f of n.querySelectorAll?.(sel)||[]){const v=f.dataset?.num||f.dataset?.count||f.dataset?.qty||f.dataset?.quantity||f.textContent;const m=String(v||'').trim().match(/^([1-9][0-9]?)$/);if(m)return Number(m[1])}}const t=(n.textContent||'').replace(/\\s+/g,' ').trim();if(t.length<=180){const ms=[...t.matchAll(/(?:^|\\s)([1-9][0-9]?)(?:\\s|$)/g)].map(x=>Number(x[1])).filter(x=>x>=1&&x<=50);if(ms.length)return ms[ms.length-1]}n=n.parentElement}return 1};const map=new Map();const seen=[];for(const img of document.querySelectorAll('img')){const src=U(img);seen.push(src);if(!C(src,img))continue;const holder=H(img);const name=N(img.alt||img.title||src.split('/').pop().split('?')[0]);const item=map.get(src)||{src,name,code:name,qty:0};item.qty+=R(holder);map.set(src,item)}const payload={source:location.href,deckCode:(location.pathname.split('/').filter(Boolean).pop()||'decklog'),entries:[...map.values()]};if(!payload.entries.length){const debug={imgCount:document.images.length,sampleUrls:seen.filter(Boolean).slice(0,12)};try{await navigator.clipboard.writeText(JSON.stringify(debug,null,2))}catch{}alert('Không tìm thấy ảnh card theo bộ lọc mới. Đã copy debug URL mẫu nếu trình duyệt cho phép. Hãy gửi lại thông báo này hoặc dán debug cho ChatGPT.');return}try{await fetch(E,{method:'POST',mode:'cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});alert('Đã gửi '+payload.entries.length+' loại card về InCard. Quay lại InCard và bấm Nhận deck đã gửi.')}catch(e){try{await navigator.clipboard.writeText(JSON.stringify(payload));alert('Không gửi được localhost, đã copy JSON. Quay lại InCard và dán vào ô JSON helper.')}catch{prompt('Copy JSON này rồi dán vào InCard:',JSON.stringify(payload))}}})()`;
-    return "javascript:" + source;
+    return `javascript:(${deckLogBookmarkletRunner.toString()})(${JSON.stringify(BRIDGE_ENDPOINT)})`;
   }
 
   function installBridgePanel() {
