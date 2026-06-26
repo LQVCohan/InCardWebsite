@@ -33,10 +33,10 @@ function buildProxyHeaders(targetUrl) {
 
 function rewriteDeckLogText(text) {
   return String(text || "")
-    .replace(/https:\/\/decklog-en\.bushiroad\.com/g, "/decklog-proxy")
-    .replace(/https:\/\/decklog\.bushiroad\.com/g, "/decklog-proxy")
-    .replace(/(src|href|action)=(["'])\/(?!\/)/gi, `$1=$2/decklog-proxy/`)
-    .replace(/url\((['"]?)\/(?!\/)/gi, "url($1/decklog-proxy/");
+    .replace(/https:\/\/decklog-en\.bushiroad\.com/g, "")
+    .replace(/https:\/\/decklog\.bushiroad\.com/g, "")
+    .replace(/(src|href|action)=(["'])\/(?!\/)/gi, `$1=$2/`)
+    .replace(/url\((['"]?)\/(?!\/)/gi, "url($1/");
 }
 
 async function proxyRemote(targetUrl, req, res, { rewrite = false } = {}) {
@@ -83,31 +83,32 @@ app.get("/img", async (req, res) => {
   return proxyRemote(url, req, res, { rewrite: false });
 });
 
-// 3) Same-origin DeckLog proxy.
-// This lets the frontend load DeckLog in a hidden iframe and read the rendered card grid.
+// 3) Optional prefixed DeckLog proxy.
 app.use("/decklog-proxy", async (req, res) => {
   const pathAndQuery = req.originalUrl.replace(/^\/decklog-proxy/, "") || "/";
   return proxyRemote(`${DECKLOG_ORIGIN}${pathAndQuery}`, req, res, { rewrite: true });
 });
 
-// 4) DeckLog app assets/API often use root-relative paths after the proxied page loads.
-// Keep these paths available on localhost so the hidden iframe can finish rendering.
+// 4) DeckLog view/assets/API often use root-relative paths.
+// These localhost routes let a hidden iframe render DeckLog as same-origin, so the frontend can read the rendered card grid.
 [
   "/api",
   "/ajax",
   "/assets",
   "/build",
   "/css",
+  "/deck",
+  "/deckview",
   "/fonts",
   "/images",
-  "/img",
   "/js",
   "/packs",
   "/rails",
+  "/recipe",
   "/storage",
   "/system",
+  "/view",
 ].forEach((prefix) => {
-  if (prefix === "/img") return;
   app.use(prefix, async (req, res, next) => {
     if (req.method !== "GET") return next();
     return proxyRemote(`${DECKLOG_ORIGIN}${req.originalUrl}`, req, res, { rewrite: true });
