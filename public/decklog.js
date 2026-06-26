@@ -1,8 +1,11 @@
 /* =============================================================
- DeckLog importer for Card Printer Pro
- - Import DeckLog code/link into the existing card list with exact qty
- - Download every card image copy as a ZIP file
- ============================================================= */
+  Universal import panel for Card Printer Pro
+  - Direct image URL import
+  - Multiple image URLs, one per line
+  - Deck text lines such as: 2x CARD_CODE or CARD_CODE 2
+  - Best-effort DeckLog link/code reader when public data is available
+  - ZIP download for imported image entries
+  ============================================================= */
 (function () {
   const DECKLOG_PROXY_URL = "http://localhost:3000/img?url=";
   const DECKLOG_DOMAINS = [
@@ -19,13 +22,13 @@
     panel.id = "decklogPanel";
     panel.className = "uploader small-uploader";
     panel.innerHTML = `
-      <p><strong>Nhập DeckLog</strong></p>
+      <p><strong>Nhập link / DeckLog / danh sách ảnh</strong></p>
       <div class="decklog-import-row">
-        <input id="decklogInput" type="text" placeholder="Dán DeckLog code hoặc link deck..." />
-        <button id="decklogImportBtn" class="btn primary">Nhập DeckLog</button>
+        <input id="decklogInput" type="text" placeholder="Dán link ảnh, nhiều link ảnh, DeckLog code/link hoặc text deck..." />
+        <button id="decklogImportBtn" class="btn primary">Nhập vào danh sách</button>
         <button id="decklogZipBtn" class="btn outline">Tải ZIP ảnh</button>
       </div>
-      <p id="decklogStatus" class="hint">Hỗ trợ DeckLog code/link. Số lượng card sẽ được giữ theo qty trong deck.</p>
+      <p id="decklogStatus" class="hint">Ưu tiên tốt nhất: link ảnh trực tiếp hoặc nhiều link ảnh mỗi dòng. DeckLog share link sẽ được thử đọc nếu có dữ liệu công khai.</p>
     `;
 
     const controls = document.querySelector(".controls");
@@ -41,7 +44,7 @@
       downloadDeckLogZipFromInput(input.value);
     });
     input?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") importDeckLogFromInput(input.value);
+      if (event.key === "Enter" && !event.shiftKey) importDeckLogFromInput(input.value);
     });
   }
 
@@ -70,7 +73,7 @@
   }
 
   function uniq(list) {
-    return [...new Set(list.filter(Boolean))];
+    return [...new Set((list || []).filter(Boolean))];
   }
 
   function safeFileName(name) {
@@ -89,6 +92,66 @@
     const n = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
     if (!Number.isFinite(n)) return 1;
     return Math.max(1, Math.floor(n));
+  }
+
+  function isDeckLogUrl(url) {
+    return /^https?:\/\/(decklog-en\.)?bushiroad\.com/i.test(String(url || ""));
+  }
+
+  function isProbablyImageUrl(url) {
+    const value = String(url || "").trim();
+    if (!/^https?:\/\//i.test(value)) return false;
+    if (isDeckLogUrl(value)) return false;
+    return /\.(png|jpe?g|webp|gif|avif|bmp)(\?|#|$)/i.test(value) || /image|img|card|thumb|cdn|assets/i.test(value);
+  }
+
+  function absolutize(url, baseUrl) {
+    try {
+      return new URL(url, baseUrl || location.href).href;
+    } catch {
+      return url;
+    }
+  }
+
+  function extractUrls(text) {
+    return String(text || "").match(/https?:\/\/[^\s"'<>]+/gi) || [];
+  }
+
+  function parseDirectImageLinks(text) {
+    const entries = [];
+    const lines = String(text || "").split(/\r?\n/);
+    for (const lineRaw of lines) {
+      const line = lineRaw.trim();
+      if (!line) continue;
+      const urls = extractUrls(line).filter(isProbablyImageUrl);
+      if (!urls.length) continue;
+      const qtyPrefix = line.match(/^([0-9]{1,3})\s*[x×*]?\s+/i);
+      const qtySuffix = line.match(/\s+[x×*]?\s*([0-9]{1,3})$/i);
+      const qty = normalizeQty(qtyPrefix?.[1] || qtySuffix?.[1] || 1);
+      for (const url of urls) {
+        entries.push({
+          qty,
+          code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+          name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+          src: url,
+          sourceUrl: url,
+        });
+      }
+    }
+
+    if (!entries.length) {
+      const urls = extractUrls(text).filter(isProbablyImageUrl);
+      for (const url of urls) {
+        entries.push({
+          qty: 1,
+          code: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+          name: safeFileName(url.split("/").pop()?.split("?")[0] || "image"),
+          src: url,
+          sourceUrl: url,
+        });
+      }
+    }
+    return normalizeEntries(entries);
   }
 
   function extractDeckLogCode(input) {
@@ -220,9 +283,7 @@
     if (typeof obj !== "object") return undefined;
     const lowerKeys = keyNames.map((k) => k.toLowerCase());
     for (const [key, value] of Object.entries(obj)) {
-      if (lowerKeys.includes(key.toLowerCase()) && value !== undefined && value !== null && value !== "") {
-        return value;
-      }
+      if (lowerKeys.includes(key.toLowerCase()) && value !== undefined && value !== null && value !== "") return value;
     }
     for (const value of Object.values(obj)) {
       const nested = firstDeepValue(value, keyNames, depth + 1);
@@ -235,10 +296,8 @@
     if (!obj || depth > 5) return "";
     if (typeof obj === "string") {
       const value = obj.trim();
-      const isImageLike = /\.(png|jpe?g|webp|gif)(\?|$)/i.test(value) || /card|image|thumb/i.test(value);
-      if (isImageLike && (/^https?:\/\//i.test(value) || value.startsWith("/"))) {
-        return absolutize(value, baseUrl);
-      }
+      const isImageLike = /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(value) || /card|image|thumb|img/i.test(value);
+      if (isImageLike && (/^https?:\/\//i.test(value) || value.startsWith("/"))) return absolutize(value, baseUrl);
       return "";
     }
     if (Array.isArray(obj)) {
@@ -260,14 +319,6 @@
       if (found) return found;
     }
     return "";
-  }
-
-  function absolutize(url, baseUrl) {
-    try {
-      return new URL(url, baseUrl || location.href).href;
-    } catch {
-      return url;
-    }
   }
 
   function collectCardEntriesFromJson(root, sourceUrl) {
@@ -293,9 +344,7 @@
         const name = nameRaw === undefined || nameRaw === null ? code : String(nameRaw).trim();
         const hasCardSignal = imageUrl || /[A-Z0-9_-]+[\/.-][A-Z0-9_-]+/i.test(code) || /card/i.test(Object.keys(node).join(" "));
         const hasQtySignal = qtyRaw !== undefined || Object.keys(node).some((key) => qtyKeys.includes(key));
-        if (hasCardSignal && (hasQtySignal || imageUrl)) {
-          entries.push({ code, name, qty, src: imageUrl, sourceUrl });
-        }
+        if (hasCardSignal && (hasQtySignal || imageUrl)) entries.push({ code, name, qty, src: imageUrl, sourceUrl });
       }
 
       const children = Array.isArray(node) ? node : Object.values(node);
@@ -318,9 +367,7 @@
         continue;
       }
       match = line.match(/^(.+?)\s+[x×*]?\s*([0-9]{1,3})$/i);
-      if (match && /[A-Z0-9]/i.test(match[1])) {
-        entries.push({ qty: normalizeQty(match[2]), code: match[1].trim(), name: match[1].trim(), src: "" });
-      }
+      if (match && /[A-Z0-9]/i.test(match[1])) entries.push({ qty: normalizeQty(match[2]), code: match[1].trim(), name: match[1].trim(), src: "" });
     }
     return normalizeEntries(entries);
   }
@@ -330,9 +377,9 @@
     for (const entry of entries) {
       const code = String(entry.code || "").trim();
       const src = String(entry.src || "").trim();
-      const name = String(entry.name || code || src || "DeckLog card").trim();
+      const name = String(entry.name || code || src || "Imported card").trim();
       if (!code && !src && !name) continue;
-      const key = code || src || name;
+      const key = src || code || name;
       const current = map.get(key);
       const qty = normalizeQty(entry.qty);
       if (current) {
@@ -350,13 +397,14 @@
     const candidates = [];
     if (entry.src) candidates.push(entry.src);
     const code = String(entry.code || "").trim();
-    if (code) {
+    if (code && !/^https?:\/\//i.test(code)) {
       const encodedPath = code.split("/").map(encodeURIComponent).join("/");
       const encodedFile = encodeURIComponent(code);
       for (const domain of DECKLOG_DOMAINS) {
         candidates.push(`${domain}/images/card/${encodedPath}.png`);
         candidates.push(`${domain}/images/cards/${encodedPath}.png`);
         candidates.push(`${domain}/assets/images/card/${encodedPath}.png`);
+        candidates.push(`${domain}/assets/image/card/${encodedPath}.png`);
         candidates.push(`${domain}/assets/img/card/${encodedPath}.png`);
         candidates.push(`${domain}/card_images/${encodedFile}.png`);
         candidates.push(`${domain}/card/${encodedFile}.png`);
@@ -367,11 +415,15 @@
 
   async function resolveDeckLog(input) {
     const raw = String(input || "").trim();
-    if (!raw) throw new Error("Bạn chưa nhập DeckLog code/link.");
+    if (!raw) throw new Error("Bạn chưa nhập link ảnh, DeckLog code/link hoặc text deck.");
+
+    const imageLinks = parseDirectImageLinks(raw);
+    if (imageLinks.length) return withImageCandidates(imageLinks);
 
     const pasted = parseDeckTextLines(raw);
     if (pasted.length > 1) return withImageCandidates(pasted);
 
+    const code = extractDeckLogCode(raw);
     const urls = buildDeckLogCandidateUrls(raw);
     const errors = [];
     for (const url of urls) {
@@ -380,6 +432,7 @@
         const text = await fetchTextWithFallback(url);
         const json = parseJsonLoose(text);
         let entries = json ? collectCardEntriesFromJson(json, url) : [];
+        if (!entries.length) entries = parseDirectImageLinks(text);
         if (!entries.length) entries = parseDeckTextLines(text);
         if (entries.length) return withImageCandidates(entries);
       } catch (error) {
@@ -387,30 +440,26 @@
       }
     }
     console.warn("DeckLog resolve errors", errors);
-    throw new Error("Chưa đọc được deck từ DeckLog code/link này. Hãy thử dán link share đầy đủ hoặc export text của DeckLog.");
+    throw new Error(`Không đọc được DeckLog ${code ? `(${code}) ` : ""}từ link/code này. DeckLog có thể không trả dữ liệu công khai; hãy dán link ảnh trực tiếp, nhiều link ảnh mỗi dòng, hoặc text export của deck.`);
   }
 
   function withImageCandidates(entries) {
     return entries.map((entry) => {
       const imageCandidates = buildImageCandidates(entry);
-      return {
-        ...entry,
-        imageCandidates,
-        src: entry.src || imageCandidates[0] || "",
-      };
+      return { ...entry, imageCandidates, src: entry.src || imageCandidates[0] || "" };
     });
   }
 
   async function importDeckLogFromInput(input) {
     if (!requirePrinterApi()) return;
     try {
-      setDeckLogStatus("Đang đọc DeckLog...");
+      setDeckLogStatus("Đang đọc dữ liệu nhập...");
       const entries = await resolveDeckLog(input);
-      if (!entries.length) throw new Error("DeckLog không có card hợp lệ.");
+      if (!entries.length) throw new Error("Không có card/link ảnh hợp lệ để nhập.");
       if (typeof snapshot === "function") snapshot();
 
       const importedCards = entries.map((entry) => ({
-        name: entry.name || entry.code || "DeckLog card",
+        name: entry.name || entry.code || "Imported card",
         src: entry.src,
         qty: normalizeQty(entry.qty),
         external: true,
@@ -425,13 +474,12 @@
       updateCounters();
 
       lastDeckLogEntries = entries;
-      lastDeckLogName = extractDeckLogCode(input) || "decklog";
+      lastDeckLogName = extractDeckLogCode(input) || "imported";
       const total = entries.reduce((sum, entry) => sum + normalizeQty(entry.qty), 0);
-      setDeckLogStatus(`Đã nhập ${entries.length} loại card / ${total} file ảnh từ DeckLog.`);
+      setDeckLogStatus(`Đã nhập ${entries.length} loại card/link / ${total} bản in.`);
     } catch (error) {
       console.error(error);
-      setDeckLogStatus(error.message || "Nhập DeckLog thất bại.", true);
-      alert(error.message || "Nhập DeckLog thất bại.");
+      setDeckLogStatus(error.message || "Nhập thất bại.", true);
     }
   }
 
@@ -440,17 +488,16 @@
       let entries = lastDeckLogEntries;
       const code = extractDeckLogCode(input);
       if (!entries.length || (code && code !== lastDeckLogName)) {
-        setDeckLogStatus("Đang đọc DeckLog để tải ZIP...");
+        setDeckLogStatus("Đang đọc dữ liệu để tải ZIP...");
         entries = await resolveDeckLog(input);
         lastDeckLogEntries = entries;
-        lastDeckLogName = code || "decklog";
+        lastDeckLogName = code || "imported";
       }
-      if (!entries.length) throw new Error("Không có card DeckLog để tải ZIP.");
+      if (!entries.length) throw new Error("Không có ảnh để tải ZIP.");
       await downloadImagesAsZip(entries, lastDeckLogName);
     } catch (error) {
       console.error(error);
       setDeckLogStatus(error.message || "Tải ZIP thất bại.", true);
-      alert(error.message || "Tải ZIP thất bại.");
     }
   }
 
@@ -473,7 +520,7 @@
     const zipBlob = makeZipBlob(files);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(zipBlob);
-    a.download = `${safeFileName(deckName || "decklog")}_images.zip`;
+    a.download = `${safeFileName(deckName || "imported")}_images.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     setDeckLogStatus(`Đã tạo ZIP gồm ${files.length} file ảnh.`);
@@ -499,7 +546,7 @@
     if (type.includes("png")) return ".png";
     if (type.includes("webp")) return ".webp";
     if (type.includes("gif")) return ".gif";
-    const match = String(url || "").split("?")[0].match(/\.(png|jpe?g|webp|gif)$/i);
+    const match = String(url || "").split("?")[0].match(/\.(png|jpe?g|webp|gif|avif)$/i);
     if (match) return `.${match[1].toLowerCase().replace("jpeg", "jpg")}`;
     return ".jpg";
   }
@@ -512,55 +559,14 @@
       const nameBytes = utf8(file.name);
       const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
       const crc = crc32(data);
-      const localHeader = concatBytes(
-        u32(0x04034b50),
-        u16(20),
-        u16(0),
-        u16(0),
-        u16(0),
-        u16(0),
-        u32(crc),
-        u32(data.length),
-        u32(data.length),
-        u16(nameBytes.length),
-        u16(0),
-        nameBytes
-      );
+      const localHeader = concatBytes(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes);
       localParts.push(localHeader, data);
-      const centralHeader = concatBytes(
-        u32(0x02014b50),
-        u16(20),
-        u16(20),
-        u16(0),
-        u16(0),
-        u16(0),
-        u16(0),
-        u32(crc),
-        u32(data.length),
-        u32(data.length),
-        u16(nameBytes.length),
-        u16(0),
-        u16(0),
-        u16(0),
-        u16(0),
-        u32(0),
-        u32(offset),
-        nameBytes
-      );
+      const centralHeader = concatBytes(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes);
       centralParts.push(centralHeader);
       offset += localHeader.length + data.length;
     }
     const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-    const endRecord = concatBytes(
-      u32(0x06054b50),
-      u16(0),
-      u16(0),
-      u16(files.length),
-      u16(files.length),
-      u32(centralSize),
-      u32(offset),
-      u16(0)
-    );
+    const endRecord = concatBytes(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(centralSize), u32(offset), u16(0));
     return new Blob([...localParts, ...centralParts, endRecord], { type: "application/zip" });
   }
 
@@ -570,15 +576,13 @@
 
   function u16(value) {
     const out = new Uint8Array(2);
-    const view = new DataView(out.buffer);
-    view.setUint16(0, value & 0xffff, true);
+    new DataView(out.buffer).setUint16(0, value & 0xffff, true);
     return out;
   }
 
   function u32(value) {
     const out = new Uint8Array(4);
-    const view = new DataView(out.buffer);
-    view.setUint32(0, value >>> 0, true);
+    new DataView(out.buffer).setUint32(0, value >>> 0, true);
     return out;
   }
 
@@ -608,9 +612,6 @@
     return (crc ^ 0xffffffff) >>> 0;
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", installDeckLogPanel);
-  } else {
-    installDeckLogPanel();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", installDeckLogPanel);
+  else installDeckLogPanel();
 })();
