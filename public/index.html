@@ -257,6 +257,7 @@
         try { await loadScript(GSAP_CDN); } catch { console.info("GSAP CDN chưa tải được, app vẫn chạy không animation."); }
         await loadScript("app.js");
         await loadScript("decklog.js");
+        await loadScript("decklog-bridge.js");
         await loadScript("gsap-ui.js");
       })();
     </script>
