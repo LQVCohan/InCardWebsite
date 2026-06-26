@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="incard-compact.css" />
   </head>
   <body>
     <header class="topbar">
@@ -23,6 +24,8 @@
     </header>
 
     <main class="container">
+      <canvas id="layoutPreview" class="layout-preview-hidden" width="800" height="1131" aria-hidden="true"></canvas>
+
       <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
         <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào đây</strong></p>
         <p class="drop-sub">hoặc</p>
@@ -153,10 +156,6 @@
           <label for="shortcutDec">Phím giảm số lượng (hover)</label>
           <input type="text" id="shortcutDec" class="shortcut-input" value="F" maxlength="1" />
         </div>
-      </section>
-
-      <section class="preview-section">
-        <canvas id="layoutPreview" width="800" height="1131" aria-label="Xem trước layout in"></canvas>
       </section>
 
       <section class="actions">
