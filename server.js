@@ -5,10 +5,16 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const dns = require("dns");
+
+// On some Windows/local networks, Node fetch may try IPv6 first and hang while Chrome works.
+// Prefer IPv4 so DeckLog proxy requests fail fast or resolve like the browser.
+dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
 const PORT = 3000;
 const DECKLOG_ORIGIN = "https://decklog-en.bushiroad.com";
+const FETCH_TIMEOUT_MS = 15000;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -26,6 +32,7 @@ function buildProxyHeaders(targetUrl) {
   try {
     const target = new URL(targetUrl);
     headers.referer = `${target.origin}/`;
+    headers.origin = target.origin;
   } catch {}
 
   return headers;
@@ -35,18 +42,41 @@ function rewriteDeckLogText(text) {
   return String(text || "")
     .replace(/https:\/\/decklog-en\.bushiroad\.com/g, "")
     .replace(/https:\/\/decklog\.bushiroad\.com/g, "")
-    .replace(/(src|href|action)=(["'])\/(?!\/)/gi, `$1=$2/`)
+    .replace(/(src|href|action)\s*=\s*(["'])\/(?!\/)/gi, `$1=$2/`)
     .replace(/url\((['"]?)\/(?!\/)/gi, "url($1/");
+}
+
+async function fetchWithTimeout(targetUrl) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(targetUrl, {
+      redirect: "follow",
+      headers: buildProxyHeaders(targetUrl),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sendProxyError(res, status, message, targetUrl) {
+  res.status(status).type("text/plain").send([
+    message,
+    "",
+    `Target: ${targetUrl}`,
+    "Nếu lỗi này xuất hiện khi mở /view/<deckCode>, nghĩa là server local chưa lấy được DeckLog từ phía Node.",
+  ].join("\n"));
 }
 
 async function proxyRemote(targetUrl, req, res, { rewrite = false } = {}) {
   try {
-    const upstream = await fetch(targetUrl, {
-      redirect: "follow",
-      headers: buildProxyHeaders(targetUrl),
-    });
+    const upstream = await fetchWithTimeout(targetUrl);
 
-    if (!upstream.ok) return res.status(upstream.status).send(`Upstream error ${upstream.status}`);
+    if (!upstream.ok) {
+      return sendProxyError(res, upstream.status, `Upstream error ${upstream.status}`, targetUrl);
+    }
 
     const ct = upstream.headers.get("content-type") || "application/octet-stream";
     res.set("Content-Type", ct);
@@ -59,16 +89,20 @@ async function proxyRemote(targetUrl, req, res, { rewrite = false } = {}) {
       return res.send(rewriteDeckLogText(text));
     }
 
-    if (upstream.body && typeof upstream.body.pipe === "function") {
-      upstream.body.pipe(res);
-    } else {
-      const buf = Buffer.from(await upstream.arrayBuffer());
-      res.end(buf);
-    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    return res.end(buf);
   } catch (e) {
     console.error("Proxy error", targetUrl, e);
-    res.status(500).send(`Proxy error: ${e.message}`);
+    const status = e?.name === "AbortError" ? 504 : 500;
+    const message = e?.name === "AbortError"
+      ? `Proxy timeout sau ${FETCH_TIMEOUT_MS / 1000}s`
+      : `Proxy error: ${e.message}`;
+    return sendProxyError(res, status, message, targetUrl);
   }
+}
+
+function deckLogTargetFromLocalRequest(req) {
+  return `${DECKLOG_ORIGIN}${req.originalUrl}`;
 }
 
 // 1) Static website (./public)
@@ -76,11 +110,14 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 
 // 2) Generic proxy: http://localhost:3000/img?url=...
-// Used for direct image downloads and raw DeckLog HTML/API fetches.
-app.get("/img", async (req, res) => {
+// If DeckLog itself requests /img/..., proxy that path to DeckLog instead of returning "Missing url".
+app.use("/img", async (req, res, next) => {
+  if (req.method !== "GET") return next();
+
   const url = req.query.url;
-  if (!url) return res.status(400).send("Missing url");
-  return proxyRemote(url, req, res, { rewrite: false });
+  if (url) return proxyRemote(url, req, res, { rewrite: false });
+
+  return proxyRemote(deckLogTargetFromLocalRequest(req), req, res, { rewrite: true });
 });
 
 // 3) Optional prefixed DeckLog proxy.
@@ -96,6 +133,9 @@ app.use("/decklog-proxy", async (req, res) => {
   "/ajax",
   "/assets",
   "/build",
+  "/card",
+  "/cards",
+  "/card_images",
   "/css",
   "/deck",
   "/deckview",
@@ -111,13 +151,21 @@ app.use("/decklog-proxy", async (req, res) => {
 ].forEach((prefix) => {
   app.use(prefix, async (req, res, next) => {
     if (req.method !== "GET") return next();
-    return proxyRemote(`${DECKLOG_ORIGIN}${req.originalUrl}`, req, res, { rewrite: true });
+    return proxyRemote(deckLogTargetFromLocalRequest(req), req, res, { rewrite: true });
   });
 });
 
 // 5) Friendly root message (optional)
 app.get("/", (req, res) => {
   res.send('✅ Server running. Open <a href="/index.html">/index.html</a> or use /img?url=...');
+});
+
+// 6) Last-chance DeckLog proxy for root-relative assets that DeckLog loads from paths we do not know yet.
+// Static files are served before this, so /index.html, /app.js, /style.css, /decklog.js still belong to InCard.
+app.use(async (req, res, next) => {
+  if (req.method !== "GET") return next();
+  if (req.path === "/" || req.path === "/index.html") return next();
+  return proxyRemote(deckLogTargetFromLocalRequest(req), req, res, { rewrite: true });
 });
 
 app.listen(PORT, () => {
