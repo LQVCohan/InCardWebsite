@@ -16,6 +16,8 @@ const PORT = 3000;
 const DECKLOG_ORIGIN = "https://decklog-en.bushiroad.com";
 const FETCH_TIMEOUT_MS = 15000;
 
+let latestDeckLogImport = null;
+
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -105,11 +107,54 @@ function deckLogTargetFromLocalRequest(req) {
   return `${DECKLOG_ORIGIN}${req.originalUrl}`;
 }
 
-// 1) Static website (./public)
+function normalizeBridgeEntries(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => ({
+      src: String(entry?.src || entry?.url || "").trim(),
+      qty: Math.max(1, Math.floor(Number(entry?.qty || entry?.quantity || entry?.count || 1) || 1)),
+      name: String(entry?.name || entry?.code || entry?.title || "DeckLog card").trim().slice(0, 120),
+      code: String(entry?.code || entry?.name || entry?.title || "").trim().slice(0, 120),
+    }))
+    .filter((entry) => /^https?:\/\//i.test(entry.src));
+}
+
+// 1) Static website and JSON bridge body parsing
 app.use(cors());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 
-// 2) Generic proxy: http://localhost:3000/img?url=...
+// 2) DeckLog browser bridge.
+// A bookmarklet runs on the real DeckLog page, reads rendered card DOM there, and posts the deck to localhost.
+app.post("/decklog-import", (req, res) => {
+  const entries = normalizeBridgeEntries(req.body?.entries);
+  if (!entries.length) {
+    return res.status(400).json({ ok: false, error: "Không có entry ảnh card hợp lệ." });
+  }
+
+  latestDeckLogImport = {
+    source: String(req.body?.source || "").slice(0, 500),
+    deckCode: String(req.body?.deckCode || req.body?.code || "decklog").slice(0, 80),
+    entries,
+    receivedAt: new Date().toISOString(),
+  };
+
+  res.json({
+    ok: true,
+    count: entries.length,
+    total: entries.reduce((sum, entry) => sum + entry.qty, 0),
+    receivedAt: latestDeckLogImport.receivedAt,
+  });
+});
+
+app.get("/decklog-import/latest", (req, res) => {
+  if (!latestDeckLogImport) {
+    return res.status(404).json({ ok: false, error: "Chưa có deck nào được gửi từ DeckLog." });
+  }
+  res.json({ ok: true, ...latestDeckLogImport });
+});
+
+// 3) Generic proxy: http://localhost:3000/img?url=...
 // If DeckLog itself requests /img/..., proxy that path to DeckLog instead of returning "Missing url".
 app.use("/img", async (req, res, next) => {
   if (req.method !== "GET") return next();
@@ -120,14 +165,13 @@ app.use("/img", async (req, res, next) => {
   return proxyRemote(deckLogTargetFromLocalRequest(req), req, res, { rewrite: true });
 });
 
-// 3) Optional prefixed DeckLog proxy.
+// 4) Optional prefixed DeckLog proxy.
 app.use("/decklog-proxy", async (req, res) => {
   const pathAndQuery = req.originalUrl.replace(/^\/decklog-proxy/, "") || "/";
   return proxyRemote(`${DECKLOG_ORIGIN}${pathAndQuery}`, req, res, { rewrite: true });
 });
 
-// 4) DeckLog view/assets/API often use root-relative paths.
-// These localhost routes let a hidden iframe render DeckLog as same-origin, so the frontend can read the rendered card grid.
+// 5) DeckLog view/assets/API routes kept for debugging only.
 [
   "/api",
   "/ajax",
@@ -155,13 +199,12 @@ app.use("/decklog-proxy", async (req, res) => {
   });
 });
 
-// 5) Friendly root message (optional)
+// 6) Friendly root message (optional)
 app.get("/", (req, res) => {
   res.send('✅ Server running. Open <a href="/index.html">/index.html</a> or use /img?url=...');
 });
 
-// 6) Last-chance DeckLog proxy for root-relative assets that DeckLog loads from paths we do not know yet.
-// Static files are served before this, so /index.html, /app.js, /style.css, /decklog.js still belong to InCard.
+// 7) Last-chance DeckLog proxy for unknown root-relative assets.
 app.use(async (req, res, next) => {
   if (req.method !== "GET") return next();
   if (req.path === "/" || req.path === "/index.html") return next();
