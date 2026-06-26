@@ -22,12 +22,32 @@
   min-height: 120px;
 }
 
-#decklogPanel {
+#decklogPanel,
+#decklogBridgePanel {
   padding: 1rem;
 }
 
 .decklog-import-row {
   grid-template-columns: minmax(280px, 1fr) auto auto;
+}
+
+.decklog-bridge-json {
+  width: 100%;
+  margin-top: 0.75rem;
+  resize: vertical;
+  min-height: 72px;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.72);
+  color: #e5eefc;
+  padding: 0.75rem;
+  font: inherit;
+  outline: none;
+}
+
+.decklog-bridge-json:focus {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
 }
 
 .controls {
