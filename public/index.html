@@ -17,20 +17,25 @@
         </div>
       </div>
       <div class="deck-status">
-        <span id="currentDeckName" class="deck-name">🗂 Deck: <em>Chưa chọn</em></span>
-        <button id="updateDeckBtn" class="btn outline small" disabled title="Ghi đè deck đang mở">💾 Cập nhật Deck</button>
+        <span id="currentDeckName" class="deck-name">🗂 Deck: <em>Chưa
+            chọn</em></span>
+        <button id="updateDeckBtn" class="btn outline small" disabled
+          title="Ghi đè deck đang mở">💾 Cập nhật Deck</button>
       </div>
     </header>
 
     <main class="container">
       <section class="uploader" id="dropzone" aria-label="Kéo & thả ảnh">
-        <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào đây</strong></p>
+        <p class="drop-title"><strong>Kéo & thả ảnh card hoặc file .ydk vào
+            đây</strong></p>
         <p class="drop-sub">hoặc</p>
         <label class="btn" for="fileInput">
           Chọn ảnh
-          <input type="file" id="fileInput" accept="image/*,.ydk" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,.ydk" multiple
+            hidden />
         </label>
-        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp. File .ydk sẽ tự lấy ảnh theo ID.</p>
+        <p class="hint">Có thể dán (Ctrl + V) ảnh hoặc URL ảnh trực tiếp. File
+          .ydk sẽ tự lấy ảnh theo ID.</p>
         <div class="format-badges" aria-label="Định dạng hỗ trợ">
           <span class="badge">.jpg</span>
           <span class="badge">.png</span>
@@ -41,7 +46,8 @@
         <p class="drop-hint" id="dropHint">Thả vào đây 👇</p>
       </section>
 
-      <section class="uploader small-uploader" id="backSection" style="display:none">
+      <section class="uploader small-uploader" id="backSection"
+        style="display:none">
         <p><strong>Ảnh mặt sau</strong></p>
         <label class="btn" for="backInput">
           Chọn ảnh mặt sau
@@ -143,27 +149,34 @@
 
         <div>
           <label for="shortcutDelete">Phím xoá card (hover)</label>
-          <input type="text" id="shortcutDelete" class="shortcut-input" value="E" maxlength="1" />
+          <input type="text" id="shortcutDelete" class="shortcut-input"
+            value="E" maxlength="1" />
         </div>
         <div>
           <label for="shortcutInc">Phím tăng số lượng (hover)</label>
-          <input type="text" id="shortcutInc" class="shortcut-input" value="D" maxlength="1" />
+          <input type="text" id="shortcutInc" class="shortcut-input" value="D"
+            maxlength="1" />
         </div>
         <div>
           <label for="shortcutDec">Phím giảm số lượng (hover)</label>
-          <input type="text" id="shortcutDec" class="shortcut-input" value="F" maxlength="1" />
+          <input type="text" id="shortcutDec" class="shortcut-input" value="F"
+            maxlength="1" />
         </div>
       </section>
 
       <section class="preview-section">
-        <canvas id="layoutPreview" width="800" height="1131" aria-label="Xem trước layout in"></canvas>
+        <canvas id="layoutPreview" width="800" height="1131"
+          aria-label="Xem trước layout in"></canvas>
       </section>
 
       <section class="actions">
         <div class="action-group">
           <button id="exportPdf" class="btn primary">📥 Xuất PDF (in)</button>
-          <button id="exportDocx" class="btn primary">📝 Xuất DOCX (Word)</button>
-          <button id="testWord" class="btn outline small" title="Tải file DOCX mẫu test xem Word của bạn có lỗi không">Test DOCX</button>
+          <button id="exportDocx" class="btn primary">📝 Xuất DOCX
+            (Word)</button>
+          <button id="testWord" class="btn outline small"
+            title="Tải file DOCX mẫu test xem Word của bạn có lỗi không">Test
+            DOCX</button>
         </div>
 
         <div class="action-group">
@@ -176,7 +189,8 @@
         </div>
 
         <div class="action-group">
-          <button id="exportYdk" class="btn outline" disabled title="Chỉ khả dụng khi có card từ .ydk">⬆ Xuất .ydk</button>
+          <button id="exportYdk" class="btn outline" disabled
+            title="Chỉ khả dụng khi có card từ .ydk">⬆ Xuất .ydk</button>
           <button id="exportJson" class="btn outline">⬆ Xuất .json</button>
           <button id="importBtn" class="btn outline">⬇ Nhập .json</button>
           <input type="file" id="importJson" accept="application/json" hidden />
@@ -184,7 +198,7 @@
       </section>
 
       <div class="stats">
-        Card khác nhau: <strong id="countUnique">0</strong> | 
+        Card khác nhau: <strong id="countUnique">0</strong> |
         Tổng số in: <strong id="countTotal">0</strong>
       </div>
 
@@ -212,8 +226,9 @@
 
     <div id="imageViewer" class="modal hidden" role="dialog" aria-modal="true">
       <div class="modal-content viewer-content">
-        <button id="closeImageViewer" class="close-viewer" aria-label="Đóng">×</button>
-        <img id="imageViewerImg" src="" alt="Zoom" />
+        <button id="closeImageViewer" class="close-viewer"
+          aria-label="Đóng">×</button>
+        <img id="imageViewerImg" src alt="Zoom" />
       </div>
     </div>
 
@@ -255,5 +270,12 @@
         await loadScript("app.js");
       })();
     </script>
+
+    <!-- Script chính -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+    <script src="app.js"></script>
+    <script src="decklog.js"></script>
+    <script src="gsap-ui.js"></script>
   </body>
 </html>
