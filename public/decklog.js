@@ -1,8 +1,9 @@
 /* =============================================================
   DeckLog importer for Card Printer Pro
   - DeckLog code/link input only
-  - Does NOT import DeckLog overview/share screenshots as a card
-  - Imports individual card entries with exact quantity when deck data is readable
+  - Uses localhost DeckLog proxy + hidden iframe to read the rendered card grid
+  - Does NOT import overview/share screenshots as cards
+  - Imports individual card images with exact quantity, then PDF/DOCX export uses the existing app flow
   ============================================================= */
 (function () {
   const PROXY_URL = "http://localhost:3000/img?url=";
@@ -10,9 +11,9 @@
     "https://decklog-en.bushiroad.com",
     "https://decklog.bushiroad.com",
   ];
-  const MAX_FETCHES = 90;
-  const MAX_SCRIPTS = 10;
   const MIN_IMAGE_URLS_FOR_DECK = 8;
+  const IFRAME_TIMEOUT_MS = 10000;
+  const IFRAME_POLL_MS = 500;
 
   let lastEntries = [];
   let lastDeckName = "decklog";
@@ -116,6 +117,12 @@
     }
   }
 
+  function unescapeHtml(value) {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = value;
+    return textarea.value;
+  }
+
   function extractDeckCode(input) {
     const raw = String(input || "").trim();
     if (!raw) return "";
@@ -132,51 +139,9 @@
     }
   }
 
-  function candidateDeckUrls(input) {
-    const raw = String(input || "").trim();
-    const code = extractDeckCode(raw);
-    const encoded = encodeURIComponent(code);
-    const urls = [];
-    if (/^https?:\/\//i.test(raw)) urls.push(raw);
-
-    const paths = [
-      `/view/${encoded}`,
-      `/deck/${encoded}`,
-      `/deckview/${encoded}`,
-      `/recipe/${encoded}`,
-      `/api/view/${encoded}`,
-      `/api/view?deck_code=${encoded}`,
-      `/api/view?code=${encoded}`,
-      `/api/deck/${encoded}`,
-      `/api/decks/${encoded}`,
-      `/api/deck/view/${encoded}`,
-      `/api/deck?deck_code=${encoded}`,
-      `/api/deck?code=${encoded}`,
-      `/api/deck?id=${encoded}`,
-      `/api/decklog/${encoded}`,
-      `/api/decklog?deck_code=${encoded}`,
-      `/api/decklog?code=${encoded}`,
-      `/api/deck_log/${encoded}`,
-      `/api/deck_log?deck_code=${encoded}`,
-      `/api/recipe/${encoded}`,
-      `/api/recipes/${encoded}`,
-      `/api/recipes?deck_code=${encoded}`,
-      `/system/app/api/view/${encoded}`,
-      `/system/app/api/view?deck_code=${encoded}`,
-      `/system/app/api/deck/${encoded}`,
-      `/system/app/api/deck?deck_code=${encoded}`,
-      `/system/app/api/deck/show?deck_code=${encoded}`,
-      `/system/app/api/decklog/show?deck_code=${encoded}`,
-      `/system/app/api/deck_log/show?deck_code=${encoded}`,
-      `/ajax/view?deck_code=${encoded}`,
-      `/ajax/deck?deck_code=${encoded}`,
-      `/ajax/decklog?deck_code=${encoded}`,
-    ];
-
-    for (const domain of DECKLOG_DOMAINS) {
-      for (const path of paths) urls.push(domain + path);
-    }
-    return uniq(urls);
+  function localDeckViewUrl(input) {
+    const code = extractDeckCode(input);
+    return `/view/${encodeURIComponent(code)}`;
   }
 
   async function fetchText(url) {
@@ -202,161 +167,12 @@
     return await proxied.blob();
   }
 
-  function scriptUrls(html, baseUrl) {
-    const urls = [];
-    const re = /<script[^>]+src=["']([^"']+\.js[^"']*)["'][^>]*>/gi;
-    let match;
-    while ((match = re.exec(String(html || "")))) urls.push(abs(unescapeHtml(match[1]), baseUrl));
-    return uniq(urls);
-  }
-
-  function urlVariants(path, baseUrl, code) {
-    if (!path || /\$\{|\{\{|\+|\[object/i.test(path)) return [];
-    const cleaned = String(path).replace(/\\u002F/g, "/").replace(/&amp;/g, "&");
-    if (!/^https?:\/\//i.test(cleaned) && !cleaned.startsWith("/")) return [];
-    if (/\.(png|jpe?g|webp|gif|svg|css|map)(\?|$)/i.test(cleaned)) return [];
-
-    const out = [];
-    const base = abs(cleaned, baseUrl);
-    out.push(base);
-    try {
-      const u = new URL(base);
-      const hasDeckParam = [...u.searchParams.keys()].some((key) => /deck|code|id/i.test(key));
-      if (!hasDeckParam) {
-        for (const key of ["deck_code", "code", "deck", "id"]) {
-          const copy = new URL(u.href);
-          copy.searchParams.set(key, code);
-          out.push(copy.href);
-        }
-      }
-      const encoded = encodeURIComponent(code);
-      if (!u.pathname.endsWith(`/${encoded}`)) out.push(`${u.origin}${u.pathname.replace(/\/$/, "")}/${encoded}${u.search || ""}`);
-    } catch {}
-    return out;
-  }
-
-  function discoverUrls(text, baseUrl, code) {
-    const found = [];
-    const re = /["'`]([^"'`]{1,240}(?:api|deck|Deck|recipe|Recipe|view|View)[^"'`]{0,240})["'`]/g;
-    let match;
-    while ((match = re.exec(String(text || "")))) found.push(...urlVariants(match[1], baseUrl, code));
-    return uniq(found);
-  }
-
-  async function discoverFromPage(text, sourceUrl, code, budget) {
-    const discovered = discoverUrls(text, sourceUrl, code);
-    const scripts = scriptUrls(text, sourceUrl).slice(0, budget.count);
-    budget.count -= scripts.length;
-    for (const scriptUrl of scripts) {
-      try {
-        setStatus("Đang dò API DeckLog từ script...");
-        const js = await fetchText(scriptUrl);
-        discovered.push(...discoverUrls(js, scriptUrl, code));
-      } catch (error) {
-        console.warn("Không đọc được script DeckLog", scriptUrl, error);
-      }
-    }
-    return uniq(discovered);
-  }
-
-  function parseJsonLoose(text) {
-    const raw = String(text || "").trim();
-    if (!raw) return null;
-    try { return JSON.parse(raw); } catch {}
-
-    const blocks = [
-      /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
-      /<script[^>]+id=["']__NUXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
-      /<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i,
-    ];
-    for (const re of blocks) {
-      const match = raw.match(re);
-      if (match?.[1]) {
-        try { return JSON.parse(unescapeHtml(match[1].trim())); } catch {}
-      }
-    }
-
-    const assignments = [
-      /window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
-      /window\.__NUXT__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
-      /window\.__APOLLO_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script>/i,
-    ];
-    for (const re of assignments) {
-      const match = raw.match(re);
-      if (match?.[1]) {
-        try { return JSON.parse(match[1]); } catch {}
-      }
-    }
-    return null;
-  }
-
-  function unescapeHtml(value) {
-    const textarea = document.createElement("textarea");
-    textarea.innerHTML = value;
-    return textarea.value;
-  }
-
-  function deepValue(obj, keys, depth = 0) {
-    if (!obj || depth > 5) return undefined;
-    if (Array.isArray(obj)) {
-      for (const item of obj) {
-        const value = deepValue(item, keys, depth + 1);
-        if (value !== undefined && value !== null && value !== "") return value;
-      }
-      return undefined;
-    }
-    if (typeof obj !== "object") return undefined;
-    const lower = keys.map((key) => key.toLowerCase());
-    for (const [key, value] of Object.entries(obj)) {
-      if (lower.includes(key.toLowerCase()) && value !== undefined && value !== null && value !== "") return value;
-    }
-    for (const value of Object.values(obj)) {
-      const nested = deepValue(value, keys, depth + 1);
-      if (nested !== undefined && nested !== null && nested !== "") return nested;
-    }
-    return undefined;
-  }
-
-  function firstImage(obj, baseUrl, depth = 0) {
-    if (!obj || depth > 5) return "";
-    if (typeof obj === "string") {
-      const value = obj.trim();
-      const imageLike = /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(value) || /card|image|thumb|img/i.test(value);
-      if (imageLike && (/^https?:\/\//i.test(value) || value.startsWith("/"))) return abs(value, baseUrl);
-      return "";
-    }
-    if (Array.isArray(obj)) {
-      for (const item of obj) {
-        const value = firstImage(item, baseUrl, depth + 1);
-        if (value) return value;
-      }
-      return "";
-    }
-    if (typeof obj !== "object") return "";
-    for (const [key, value] of Object.entries(obj)) {
-      if (/image|img|thumb|picture|card.*url|url/i.test(key)) {
-        const found = firstImage(value, baseUrl, depth + 1);
-        if (found) return found;
-      }
-    }
-    for (const value of Object.values(obj)) {
-      const found = firstImage(value, baseUrl, depth + 1);
-      if (found) return found;
-    }
-    return "";
-  }
-
   function looksLikeOverviewImage(url) {
     const value = String(url || "").toLowerCase();
     if (!value) return false;
     return /ogp|og-image|twitter|share|sns|deckimage|deck_image|deck-img|deck_img|recipe|thumbnail|capture|screenshot|preview|export|list|full|view/.test(value)
       && !/\/card(s)?\//.test(value)
       && !/card_images/.test(value);
-  }
-
-  function extractImgSrc(img, baseUrl) {
-    const raw = img.getAttribute("data-original") || img.getAttribute("data-src") || img.getAttribute("data-lazy") || img.getAttribute("src") || "";
-    return abs(unescapeHtml(raw), baseUrl);
   }
 
   function looksLikeCardImageUrl(url) {
@@ -367,19 +183,29 @@
       && (/\/card(s)?\/|card_images|\/assets\/.*card|card.*image|\/images\//i.test(value));
   }
 
+  function extractImgSrc(img, baseUrl) {
+    const raw =
+      img.getAttribute("data-original") ||
+      img.getAttribute("data-src") ||
+      img.getAttribute("data-lazy") ||
+      img.getAttribute("src") ||
+      "";
+    return abs(unescapeHtml(raw), baseUrl);
+  }
+
   function closestSingleImageContainer(img) {
     let node = img;
-    for (let depth = 0; depth < 6 && node; depth += 1) {
+    for (let depth = 0; depth < 7 && node; depth += 1) {
       if (node.querySelectorAll && node.querySelectorAll("img").length === 1) {
-        const text = (node.textContent || "").trim();
-        if (text.length <= 160) return node;
+        const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+        if (text.length <= 200) return node;
       }
       node = node.parentElement;
     }
     return img.parentElement || img;
   }
 
-  function readQtyNearImage(img) {
+  function readQtyNearImage(imgOrHolder) {
     const selectors = [
       "[class*='num']",
       "[class*='count']",
@@ -390,79 +216,54 @@
       "[data-qty]",
       "[data-quantity]",
     ];
-    let node = img;
-    for (let depth = 0; depth < 6 && node; depth += 1) {
+
+    let node = imgOrHolder;
+    for (let depth = 0; depth < 7 && node; depth += 1) {
       for (const selector of selectors) {
         const found = node.querySelector?.(selector);
         const value = found?.dataset?.num || found?.dataset?.count || found?.dataset?.qty || found?.dataset?.quantity || found?.textContent;
-        const match = String(value || "").trim().match(/^([1-4])$/);
+        const match = String(value || "").trim().match(/^([1-9][0-9]?)$/);
         if (match) return Number(match[1]);
       }
 
       const text = (node.textContent || "").replace(/\s+/g, " ").trim();
-      if (text.length <= 80) {
-        const matches = [...text.matchAll(/(?:^|\s)([1-4])(?:\s|$)/g)].map((match) => Number(match[1]));
-        if (matches.length) return matches[matches.length - 1];
+      if (text.length <= 120) {
+        const matches = [...text.matchAll(/(?:^|\s)([1-9][0-9]?)(?:\s|$)/g)].map((match) => Number(match[1]));
+        const plausible = matches.filter((value) => value >= 1 && value <= 50);
+        if (plausible.length) return plausible[plausible.length - 1];
       }
       node = node.parentElement;
     }
     return 1;
   }
 
-  function parseRenderedDeckLogHtml(text, baseUrl) {
-    if (typeof DOMParser === "undefined") return [];
-    const doc = new DOMParser().parseFromString(String(text || ""), "text/html");
+  function parseRenderedDeckLogDocument(doc, baseUrl) {
     const entries = [];
+    if (!doc?.querySelectorAll) return entries;
+
     for (const img of doc.querySelectorAll("img")) {
       const src = extractImgSrc(img, baseUrl);
       if (!looksLikeCardImageUrl(src)) continue;
+
       const holder = closestSingleImageContainer(img);
       const amount = readQtyNearImage(holder || img);
-      const code = img.getAttribute("alt") || img.getAttribute("title") || src.split("/").pop()?.split("?")[0] || "DeckLog card";
+      const rawName = img.getAttribute("alt") || img.getAttribute("title") || src.split("/").pop()?.split("?")[0] || "DeckLog card";
       entries.push({
         qty: amount,
-        code: safeFileName(code),
-        name: safeFileName(code),
+        code: safeFileName(rawName),
+        name: safeFileName(rawName),
         src,
         sourceUrl: baseUrl,
       });
     }
+
     return normalizeEntries(entries);
   }
 
-  function collectJsonEntries(root, sourceUrl) {
-    const entries = [];
-    const seen = new WeakSet();
-    const qtyKeys = ["qty", "quantity", "count", "num", "number", "枚数", "card_num", "cardNum", "amount"];
-    const idKeys = ["card_number", "cardNumber", "card_no", "cardNo", "card_id", "cardId", "card_code", "cardCode", "code", "id", "number"];
-    const nameKeys = ["name", "card_name", "cardName", "title", "card_title", "cardTitle"];
-
-    function visit(node, depth = 0) {
-      if (!node || depth > 12 || typeof node !== "object") return;
-      if (seen.has(node)) return;
-      seen.add(node);
-
-      if (!Array.isArray(node)) {
-        const keys = Object.keys(node).join(" ");
-        const qtyRaw = deepValue(node, qtyKeys, 0);
-        const codeRaw = deepValue(node, idKeys, 0);
-        const nameRaw = deepValue(node, nameKeys, 0);
-        const image = firstImage(node, sourceUrl, 0);
-        const code = codeRaw === undefined || codeRaw === null ? "" : String(codeRaw).trim();
-        const name = nameRaw === undefined || nameRaw === null ? code : String(nameRaw).trim();
-        const hasQty = qtyRaw !== undefined || Object.keys(node).some((key) => qtyKeys.includes(key));
-        const hasCardSignal = /card/i.test(keys) || /[A-Z0-9_-]+[\/.-][A-Z0-9_-]+/i.test(code) || image;
-        if (hasCardSignal && hasQty && !looksLikeOverviewImage(image)) {
-          entries.push({ code, name, qty: qty(qtyRaw || 1), src: image, sourceUrl });
-        }
-      }
-
-      const children = Array.isArray(node) ? node : Object.values(node);
-      for (const child of children) visit(child, depth + 1);
-    }
-
-    visit(root);
-    return normalizeEntries(entries);
+  function parseRenderedDeckLogHtml(text, baseUrl) {
+    if (typeof DOMParser === "undefined") return [];
+    const doc = new DOMParser().parseFromString(String(text || ""), "text/html");
+    return parseRenderedDeckLogDocument(doc, baseUrl);
   }
 
   function parseDeckText(text) {
@@ -482,9 +283,7 @@
   }
 
   function parseCardImageLinks(text) {
-    const urls = urlsFrom(text)
-      .filter((url) => looksLikeCardImageUrl(url));
-
+    const urls = urlsFrom(text).filter((url) => looksLikeCardImageUrl(url));
     if (uniq(urls).length < MIN_IMAGE_URLS_FOR_DECK) return [];
     return normalizeEntries(uniq(urls).map((url) => ({
       qty: 1,
@@ -551,6 +350,93 @@
     });
   }
 
+  async function waitForIframeDeck(input, code) {
+    return new Promise((resolve, reject) => {
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      iframe.tabIndex = -1;
+      iframe.style.cssText = "position:fixed;left:-12000px;top:0;width:1200px;height:900px;opacity:0;pointer-events:none;border:0;";
+
+      let done = false;
+      let timer = null;
+      const startedAt = Date.now();
+      const iframeUrl = localDeckViewUrl(input);
+
+      const cleanup = () => {
+        done = true;
+        if (timer) clearTimeout(timer);
+        setTimeout(() => iframe.remove(), 0);
+      };
+
+      const poll = () => {
+        if (done) return;
+        try {
+          const doc = iframe.contentDocument;
+          const title = doc?.title || "";
+          const entries = parseRenderedDeckLogDocument(doc, iframeUrl);
+          if (isUsableDeck(entries)) {
+            cleanup();
+            resolve(attachCandidates(entries));
+            return;
+          }
+          if (/not found|404|error/i.test(title)) {
+            cleanup();
+            reject(new Error(`DeckLog (${code}) không mở được trong proxy local.`));
+            return;
+          }
+        } catch (error) {
+          cleanup();
+          reject(error);
+          return;
+        }
+
+        if (Date.now() - startedAt >= IFRAME_TIMEOUT_MS) {
+          cleanup();
+          reject(new Error("DeckLog proxy chưa render được danh sách card. Hãy mở thử http://localhost:3000/view/" + code));
+          return;
+        }
+
+        timer = setTimeout(poll, IFRAME_POLL_MS);
+      };
+
+      iframe.addEventListener("load", () => {
+        timer = setTimeout(poll, 650);
+      }, { once: true });
+
+      document.body.appendChild(iframe);
+      iframe.src = iframeUrl;
+      timer = setTimeout(poll, 1000);
+    });
+  }
+
+  async function resolveViaRawFetch(input, code) {
+    const urls = uniq([
+      input && /^https?:\/\//i.test(String(input).trim()) ? String(input).trim() : "",
+      ...DECKLOG_DOMAINS.map((domain) => `${domain}/view/${encodeURIComponent(code)}`),
+      ...DECKLOG_DOMAINS.map((domain) => `${domain}/api/deck?deck_code=${encodeURIComponent(code)}`),
+      ...DECKLOG_DOMAINS.map((domain) => `${domain}/api/view?deck_code=${encodeURIComponent(code)}`),
+    ]);
+
+    for (const url of urls) {
+      if (!url) continue;
+      try {
+        setStatus(`Đang thử đọc DeckLog raw: ${url}`);
+        const text = await fetchText(url);
+        const candidates = [
+          parseRenderedDeckLogHtml(text, url),
+          parseDeckText(text),
+          parseCardImageLinks(text),
+        ];
+        for (const entries of candidates) {
+          if (isUsableDeck(entries)) return attachCandidates(entries);
+        }
+      } catch (error) {
+        console.warn("Raw DeckLog fetch failed", url, error);
+      }
+    }
+    return [];
+  }
+
   async function resolveDeckLog(input) {
     const raw = String(input || "").trim();
     if (!raw) throw new Error("Bạn chưa nhập DeckLog code/link.");
@@ -562,48 +448,19 @@
     const code = extractDeckCode(raw);
     if (!code) throw new Error("Không nhận diện được DeckLog code/link.");
 
-    const queue = candidateDeckUrls(raw);
-    const seen = new Set();
-    const scriptBudget = { count: MAX_SCRIPTS };
-    const errors = [];
-    let sawOverviewOnly = false;
-    let count = 0;
-
-    while (queue.length && count < MAX_FETCHES) {
-      const url = queue.shift();
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      count += 1;
-
-      try {
-        setStatus(`Đang đọc DeckLog ${code} (${count}/${Math.min(MAX_FETCHES, count + queue.length)})...`);
-        const text = await fetchText(url);
-        const json = parseJsonLoose(text);
-
-        const candidates = [];
-        if (json) candidates.push(collectJsonEntries(json, url));
-        candidates.push(parseRenderedDeckLogHtml(text, url));
-        candidates.push(parseDeckText(text));
-        candidates.push(parseCardImageLinks(text));
-
-        for (const entries of candidates) {
-          if (!entries.length) continue;
-          if (entries.length === 1 && looksLikeOverviewImage(entries[0].src)) sawOverviewOnly = true;
-          if (isUsableDeck(entries)) return attachCandidates(entries);
-        }
-
-        const discovered = await discoverFromPage(text, url, code, scriptBudget);
-        for (const next of discovered) {
-          if (!seen.has(next) && queue.length < MAX_FETCHES) queue.push(next);
-        }
-      } catch (error) {
-        errors.push(`${url}: ${error.message}`);
-      }
+    try {
+      setStatus(`Đang render DeckLog ${code} qua proxy local...`);
+      const rendered = await waitForIframeDeck(raw, code);
+      if (isUsableDeck(rendered)) return rendered;
+    } catch (error) {
+      console.warn("DeckLog iframe render failed", error);
+      setStatus(`Proxy render chưa lấy được, đang thử raw fetch DeckLog ${code}...`);
     }
 
-    console.warn("DeckLog resolve errors", errors);
-    if (sawOverviewOnly) throw new Error(`DeckLog (${code}) chỉ trả ảnh tổng hợp deck, chưa lấy được từng ảnh card. Cần link/API chứa danh sách card hoặc text export DeckLog để tạo file in đúng số lượng.`);
-    throw new Error(`Không đọc được danh sách card từ DeckLog (${code}). Hãy thử link share /view đầy đủ hoặc text export của DeckLog.`);
+    const rawFetched = await resolveViaRawFetch(raw, code);
+    if (isUsableDeck(rawFetched)) return rawFetched;
+
+    throw new Error(`Không đọc được danh sách card từ DeckLog (${code}). Hãy thử mở http://localhost:3000/view/${code}; nếu trang đó không render card thì server local chưa proxy được DeckLog.`);
   }
 
   async function importDeckLog(input) {
@@ -662,6 +519,7 @@
     for (const entry of entries) {
       for (let i = 0; i < qty(entry.qty); i++) expanded.push(entry);
     }
+
     const files = [];
     for (let index = 0; index < expanded.length; index++) {
       const entry = expanded[index];
@@ -672,6 +530,7 @@
       const base = safeFileName(entry.code || entry.name || `card-${index + 1}`);
       files.push({ name: `${pad(index + 1)}_${base}${ext}`, data });
     }
+
     const zip = makeZipBlob(files);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(zip);
@@ -709,6 +568,7 @@
     const locals = [];
     const centrals = [];
     let offset = 0;
+
     for (const file of files) {
       const name = utf8(file.name);
       const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
@@ -719,6 +579,7 @@
       centrals.push(central);
       offset += local.length + data.length;
     }
+
     const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
     const end = bytes(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(centralSize), u32(offset), u16(0));
     return new Blob([...locals, ...centrals, end], { type: "application/zip" });
